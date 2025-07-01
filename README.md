@@ -104,9 +104,9 @@ As show above, the internal code can test for a "None" WeaponType as the enum is
 
 ## Editing
 
-The editing of the CSV files can be don in any program, but to avoid conflicts, a processing step or tool should sort them via the table keys to make merging easier.
+The editing of the CSV files can be done in any program, but to avoid conflicts, a processing step or tool should sort rows via the table keys to make merging easier.
 
-Some workflows load the CSV files into a simple DB like SQLite, do editing and processing in that, then dump the contents out again into the same tables. This workflow allows complex queries on the data.
+Some workflows load the CSV files into a simple DB like SQLite by creating tables from the CSV header data. Then do editing and processing in that, then dump the contents out again into the same tables. This workflow allows complex queries on the data.
 
 
 ## Processing
