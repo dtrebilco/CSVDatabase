@@ -38,7 +38,7 @@ Link +OtherTable // Links to other table
 
 * "+TableName" or "\*TableName" - Link to a another table via it's key. If a foreign table has multiple keys, specify them with "+TableName:KeyColumnName". Use the '*' for a table link that might make table cycles (eg. references another row in the same table)
 
-* Int8/UInt8,Int16/UInt16,Int32/UInt32,Int64/UInt64,Float32/Float64 The type of the column. If no value is specified it is assumed to be a UTF8 string value. 
+* Bool, Int8/UInt8,Int16/UInt16,Int32/UInt32,Int64/UInt64,Float32/Float64 The type of the column. If no value is specified it is assumed to be a UTF8 string value. 
 
 * Min=Value and Max=Value - For value types, specify the valid range 
 
