@@ -150,16 +150,15 @@ A simple way of allowing patches at runtime (eg mods) is to also auto generate a
 
 ```json
 {
-"TableName" = {
-  "KeyName1" = {
-     "ColumnName1" = "NewValue",
-     "ColumnName2" = "NewValue",     
-  },
-  "KeyName2" = {
-     "ColumnName2" = "NewValue",     
-  }
-}
-
+    "TableName": {
+        "KeyName1": {
+            "ColumnName1": "NewValue",
+            "ColumnName2": "NewValue"
+        },
+        "KeyName2": {
+            "ColumnName2": "NewValue"
+        }
+    }
 }
 ```
 
