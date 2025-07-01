@@ -100,7 +100,7 @@ As the database does not support values having a NULL value, one typical global 
 | ------------- | 
 | None |
 
-As show above, the internal code can test for a "None" WeaponType as the enum is baked into the code. To test for a "None" Weapon, code will have compare against GlobalNones::Weapon 
+As shown above, the internal code can test for a "None" WeaponType as the enum is baked into the code. To test for a "None" Weapon, code can compare against GlobalNones::Weapon 
 
 ## Editing
 
@@ -144,5 +144,38 @@ bool ReadDBTables(const char* path)
 It is important that DB tables links are resolved after serialization or the serialization is ordered so table links can be resolved during serialization.
 
 
+## Patching at runtime
+
+A simple way of allowing patches at runtime (eg mods) is to also auto generate a function that takes json in and patches values.
+
+```json
+{
+"TableName" = {
+  "KeyName1" = {
+     "ColumnName1" = "NewValue",
+     "ColumnName2" = "NewValue",     
+  },
+  "KeyName2" = {
+     "ColumnName2" = "NewValue",     
+  }
+}
+
+}
+```
+
+```c++
+
+bool PatchDB(const char *json)
+{
+   // Check for updates to DBTable
+      // Find Key 
+        // Find ColumnName
+           // Assign new Value (with bounds checks etc)
+
+      // If key not found, add new row
+
+}
+
+```
 
 
