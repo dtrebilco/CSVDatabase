@@ -1,13 +1,13 @@
 # CSVDatabase
 
-A simple database that is stored in CSV files. Suitable for databases that need to be storable and mergable in via source control.
+A simple database that is stored in CSV files. Suitable for databases that need to be storable and mergable via source control.
 
 
 ## Introduction
 
 When developing games it is standard to have values for designers (or modders) to change how the game operates. These values can be stored in simple text files, json or even binary. 
 
-However, using these formats leads to issues when this data needs to be stored in sourcecontrol and merge conflicts occur. In most cases this will require a custom merge tool or exclusive locking of assets. 
+However, using these formats leads to issues when this data needs to be stored in source control and merge conflicts occur. In most cases this will require a custom merge tool or exclusive locking of assets. 
 
 Another issue is that lots of designers like to use programs like Excel to calculate an update values. 
 
@@ -23,14 +23,11 @@ Each CSV file has a header row that specifies the table specification.
 
 This consists of 
 ```
-<Column Name> <Optional Tokens> <Optional Comment>
+<Column Name> <Optional Tokens> <Optional Comment starting with //>
 ```
-eg.
-```
-Name Key // The key to the table 
-Value UInt8 // The value
-Link +OtherTable // Links to other table
-```
+Example table header.
+| Name Key // The key to the table | Value UInt8 // The value | Link +OtherTable // Links to other table |
+| ------- | ----------- | -----|
 
 ## Tokens
 
@@ -48,7 +45,8 @@ Link +OtherTable // Links to other table
 ## Special tables
 
 ### Enum tables
-These tables are named starting with "Enum" and must have the column names Name, Value and Comment: eg:
+These tables are named starting with "Enum" and must have the columns: Name, Value and Comment
+eg:
 
 | Name Key| Value UInt8 | Comment |
 | ------- | ----------- | -----|
@@ -56,7 +54,7 @@ These tables are named starting with "Enum" and must have the column names Name,
 |Medium|1|Standard difficulty |
 |Hard|2|Hardest difficulty |
 
-Enum tables are not loaded at runtime, but have their values baked into the runtime by having code generated. These are needed when the runtime has logic that directly uses types.
+Enum tables are not loaded at runtime, but have their values baked into generated code. These are needed when the runtime has logic that directly uses types.
 
 ```C++
 enum class GameMode : uint8_t
@@ -69,9 +67,9 @@ enum class GameMode : uint8_t
 ```
 
 ### Global tables
-Global tables are tables that start with the name "Global" will only ever have one row. 
+Global tables are tables that start with the name "Global" and will only ever have one row. 
 
-Global tables are the place to specify all the global variables needed in the database.
+Global tables are the place to specify all the global variables needed from the database.
 
 As the database does not support values having a NULL value, one typical global table is GlobalNone or GlobalNull. This tables specifies the "none" or "null" values for a given database row.
 
