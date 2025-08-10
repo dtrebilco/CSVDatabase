@@ -5,16 +5,34 @@
 #include <vector>
 
 
+struct CSVHeader
+{
+  // Name
+  // Type
+  // Is Key
+  // Min
+  // Max
+  // Is ignored
+  // Comment field
+  // Foreign table link
+};
+
+struct CSVTable
+{
+  std::vector<CSVHeader> m_headerData;
+  std::vector<std::vector<std::string>> m_rowData;
+};
+
 std::vector<std::vector<std::string>> readCSV(const char* srcData) 
 {
-  std::vector<std::vector<std::string>> data;
+  std::vector<std::vector<std::string>> csvTable;
   std::vector<std::string> row;
   std::string field;
   bool inQuotes = false;
 
   if (!srcData)
   {
-    return data;
+    return csvTable;
   }
 
   char c = *srcData;
@@ -68,7 +86,7 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
           field.clear();
 
           // Add row to data if it's not empty
-          data.push_back(row);
+          csvTable.push_back(row);
           row.clear();
         }
       }
@@ -87,10 +105,10 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
   if (!field.empty() || !row.empty())
   {
     row.push_back(std::move(field));
-    data.push_back(std::move(row));
+    csvTable.push_back(std::move(row));
   }
 
-  return data;
+  return csvTable;
 }
 
 
@@ -161,9 +179,31 @@ int main(int argc, char* argv[])
           printf("\n");
         }
 
+
+        // Check all columns have the same count
+
+        // Check that there is at least one row
+
+        // Check that all table keys are unique
+           // If a float or number - check that multiple representations are not made of the type (ie spaces)
+
+        // Check that the types are valid and in range
+
+        // Check the header data of the table and parse it to a table entry
+
+        // Add to a hashmap of all the csv files
       }
     }
   }
+
+  // Check that the table references match up
+
+  // Add code gen of runtime types
+
+     // Handle enum tables
+
+     // Handle global tables
+       // Check that there is only one row
 
   return 0;
 }
