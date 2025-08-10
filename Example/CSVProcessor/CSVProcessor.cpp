@@ -27,10 +27,18 @@ int main(int argc, char* argv[])
   // Iterate through directory
   for (const auto& entry : std::filesystem::directory_iterator(dirPath))
   {
-    // Check if file has .csv extension
-    if (entry.is_regular_file() && entry.path().extension() == ".csv") // DT_TODO What to do about case compare here
+    if (entry.is_regular_file())
     {
-      printf("%s\n", entry.path().filename().string().c_str());
+      // Check if file has .csv extension
+      std::string extension = entry.path().extension().string();
+      if (extension.size() == 4 &&
+        std::tolower(extension[0]) == '.' &&
+        std::tolower(extension[1]) == 'c' &&
+        std::tolower(extension[2]) == 's' &&
+        std::tolower(extension[3]) == 'v')
+      {
+        printf("%s\n", entry.path().filename().string().c_str());
+      }
     }
   }
 
