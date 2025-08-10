@@ -1,6 +1,98 @@
-
+#include <iostream>
+#include <fstream>
 #include <filesystem>
 #include <string>
+#include <vector>
+
+
+std::vector<std::vector<std::string>> readCSV(const char* srcData) 
+{
+  std::vector<std::vector<std::string>> data;
+  std::vector<std::string> row;
+  std::string field;
+  bool inQuotes = false;
+
+  if (!srcData)
+  {
+    return data;
+  }
+
+  char c = *srcData;
+
+  while (c)
+  {
+    if (inQuotes)
+    {
+      if (c == '"')
+      {
+        // Check for escaped quote
+        if (srcData[1] == '"')
+        {
+          // Consume the next quote
+          srcData++;
+          field += '"';
+        }
+        else
+        {
+          inQuotes = false; // End of quoted field
+        }
+      }
+      else
+      {
+        field += c; // Add character to field, including newlines
+      }
+    }
+    else
+    {
+      if (c == '"')
+      {
+        inQuotes = true; // Start of quoted field
+      }
+      else if (c == ',')
+      {
+        row.push_back(field);
+        field.clear();
+      }
+      else if (c == '\n' || c == '\r')
+      {
+        // Handle newlines (including \r\n for Windows)
+        if (c == '\r' && srcData[1] == '\n')
+        {
+          srcData++; // Consume \n in \r\n
+        }
+
+        // Add the last field of the row
+        if (!field.empty() || !row.empty())
+        {
+          row.push_back(field);
+          field.clear();
+
+          // Add row to data if it's not empty
+          data.push_back(row);
+          row.clear();
+        }
+      }
+      else
+      {
+        field += c;
+      }
+    }
+
+    // Go to next character
+    srcData++;
+    c = *srcData;
+  }
+
+  // Handle the last field and row
+  if (!field.empty() || !row.empty())
+  {
+    row.push_back(std::move(field));
+    data.push_back(std::move(row));
+  }
+
+  return data;
+}
+
 
 int main(int argc, char* argv[])
 {
@@ -37,7 +129,38 @@ int main(int argc, char* argv[])
         std::tolower(extension[2]) == 's' &&
         std::tolower(extension[3]) == 'v')
       {
-        printf("%s\n", entry.path().filename().string().c_str());
+        // Open the file in binary mode to avoid newline conversions
+        std::ifstream file(entry.path(), std::ios::binary);
+        if (!file.is_open())
+        {
+          printf("Error: Unable to open file %s\n", entry.path().string().c_str());
+          return 1;
+        }
+
+        // Seek to the end to determine file size
+        file.seekg(0, std::ios::end);
+
+        std::string csvFileData;
+        csvFileData.resize(file.tellg());
+
+        // Seek back to the start and read
+        file.seekg(0, std::ios::beg);
+        file.read(csvFileData.data(), csvFileData.size());
+
+
+        printf("%s\n", entry.path().string().c_str());
+        printf("%s\n", csvFileData.c_str());
+
+        std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.c_str());
+        for (const auto& row : csvData)
+        {
+          for (const auto& item : row)
+          {
+            printf("%s,", item.c_str());
+          }
+          printf("\n");
+        }
+
       }
     }
   }
