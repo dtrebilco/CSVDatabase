@@ -135,6 +135,7 @@ int main(int argc, char* argv[])
   }
 
   // Iterate through directory
+  std::vector<char> csvFileData;
   for (const auto& entry : std::filesystem::directory_iterator(dirPath))
   {
     if (entry.is_regular_file())
@@ -157,19 +158,24 @@ int main(int argc, char* argv[])
 
         // Seek to the end to determine file size
         file.seekg(0, std::ios::end);
-
-        std::string csvFileData;
-        csvFileData.resize(file.tellg());
-
-        // Seek back to the start and read
+        size_t fileSize = file.tellg();
         file.seekg(0, std::ios::beg);
-        file.read(csvFileData.data(), csvFileData.size());
 
+        // Read into a buffer
+        csvFileData.resize(fileSize + 1);
+        csvFileData[fileSize] = 0; // Add null terminator
+
+        file.read(csvFileData.data(), fileSize);
+        if (!file)
+        {
+          printf("Error: Unable to read file contents %s\n", entry.path().string().c_str());
+          return 1;
+        }
 
         printf("%s\n", entry.path().string().c_str());
-        printf("%s\n", csvFileData.c_str());
+        printf("%s\n", csvFileData.data());
 
-        std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.c_str());
+        std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.data());
         for (const auto& row : csvData)
         {
           for (const auto& item : row)
