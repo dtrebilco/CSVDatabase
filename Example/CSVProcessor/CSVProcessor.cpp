@@ -1,20 +1,41 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
+#include <format>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
+#define ERROR_MESSAGE(...) { char buf[256]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
+
+enum class ColumnType
+{
+  Unknown,
+
+  String,
+  Bool,
+  Int8,
+  UInt8,
+  Int16,
+  UInt16,
+  Int32,
+  UInt32,
+  Int64,
+  UInt64,
+  Float32,
+  Float64,
+};
 
 struct CSVHeader
 {
-  // Name
-  // Type
-  // Is Key
+  std::string m_name;        // Name
+  ColumnType m_type = ColumnType::Unknown;// Type
+  bool m_isKey = false;      // Is Key
   // Min
   // Max
-  // Is ignored
-  // Comment field
-  // Foreign table link
+  bool m_isIgnored = false;  // Is ignored
+  std::string m_comment;     // Comment field
+  std::string m_foreignTable;// Foreign table link
 };
 
 struct CSVTable
@@ -22,6 +43,9 @@ struct CSVTable
   std::vector<CSVHeader> m_headerData;
   std::vector<std::vector<std::string>> m_rowData;
 };
+
+std::unordered_map<std::string, CSVTable> g_tables;
+
 
 std::vector<std::vector<std::string>> readCSV(const char* srcData) 
 {
@@ -79,16 +103,13 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
           srcData++; // Consume \n in \r\n
         }
 
-        // Add the last field of the row
-        if (!field.empty() || !row.empty())
-        {
-          row.push_back(field);
-          field.clear();
+        // Add the last field of the row // DT_TODO: Should this be discarding empty rows? What if a single column? Verify against other parser
+        row.push_back(field);
+        field.clear();
 
-          // Add row to data if it's not empty
-          csvTable.push_back(row);
-          row.clear();
-        }
+        // Add row to data
+        csvTable.push_back(row);
+        row.clear();
       }
       else
       {
@@ -104,9 +125,11 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
   // Handle the last field and row
   if (!field.empty() || !row.empty())
   {
-    row.push_back(std::move(field));
-    csvTable.push_back(std::move(row));
+    row.push_back(field);
+    csvTable.push_back(row);
   }
+
+  // How to handle if still in quotes at end? inQuotes
 
   return csvTable;
 }
@@ -117,7 +140,7 @@ int main(int argc, char* argv[])
   // Check if directory path is provided
   if (argc != 2)
   {
-    printf("Usage: CSVProcessor <directory_path>\n");
+    ERROR_MESSAGE("Usage: CSVProcessor <directory_path>");
     return 1;
   }
 
@@ -130,7 +153,7 @@ int main(int argc, char* argv[])
   if (!std::filesystem::exists(dirPath) ||
       !std::filesystem::is_directory(dirPathStatus))
   {
-    printf("Error: %s' is not a valid directory\n", dirPath);
+    ERROR_MESSAGE("Error: {} is not a valid directory", dirPath);
     return 1;
   }
 
@@ -152,7 +175,7 @@ int main(int argc, char* argv[])
         std::ifstream file(entry.path(), std::ios::binary);
         if (!file.is_open())
         {
-          printf("Error: Unable to open file %s\n", entry.path().string().c_str());
+          ERROR_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
           return 1;
         }
 
@@ -168,12 +191,14 @@ int main(int argc, char* argv[])
         file.read(csvFileData.data(), fileSize);
         if (!file)
         {
-          printf("Error: Unable to read file contents %s\n", entry.path().string().c_str());
+          ERROR_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
           return 1;
         }
 
-        printf("%s\n", entry.path().string().c_str());
-        printf("%s\n", csvFileData.data());
+        std::string tableName = entry.path().stem().string();
+
+        ERROR_MESSAGE("{}", entry.path().string().c_str());
+        ERROR_MESSAGE("{}", csvFileData.data());
 
         std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.data());
         for (const auto& row : csvData)
@@ -185,19 +210,43 @@ int main(int argc, char* argv[])
           printf("\n");
         }
 
+        // Check that there is at least one row in addition to the header
+        if (csvData.size() < 2)
+        {
+          ERROR_MESSAGE("Error: Table {} does not have at least 2 rows", tableName);
+          return 1;
+        }
 
         // Check all columns have the same count
+        size_t columnCount = csvData[0].size();
+        for (size_t i = 1; i < csvData.size(); i++)
+        {
+          if (csvData[i].size() != columnCount)
+          {
+            ERROR_MESSAGE("Error: Table {} has column count not equal to header count {} != {}", tableName, csvData[i].size(), columnCount);
+            return 1;
+          }
+        }
 
-        // Check that there is at least one row
+        CSVTable newTable;
+
+        // Check the header data of the table and parse it to a table entry
 
         // Check that all table keys are unique
            // If a float or number - check that multiple representations are not made of the type (ie spaces)
 
         // Check that the types are valid and in range
 
-        // Check the header data of the table and parse it to a table entry
+        // Copy all row data over
+        newTable.m_rowData.reserve(csvData.size() - 1);
+        for (size_t i = 1; i < csvData.size(); i++)
+        {
+          newTable.m_rowData.push_back(std::move(csvData[i]));
+        }
 
         // Add to a hashmap of all the csv files
+        g_tables[tableName] = std::move(newTable);
+
       }
     }
   }
