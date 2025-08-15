@@ -26,20 +26,20 @@ This consists of
 <Column Name> <Optional Tokens> <Optional Comment starting with //>
 ```
 Example table header.
-| Name Key // The key to the table | Value UInt8 // The value | Link +OtherTable // Links to other table |
+| Name key // The key to the table | Value uint8 // The value | Link +OtherTable // Links to other table |
 | ------- | ----------- | -----|
 
 ## Tokens
 
-* Key - Is a key value for this table.  There can be multiple keys columns in a table. The combination of all Key values need to be unique for a table.
+* **key** - Is a key value for this table.  There can be multiple keys columns in a table. The combination of all Key values need to be unique for a table.
 
-* "+TableName" or "\*TableName" - Link to a another table via it's key. If a foreign table has multiple keys, specify them with "+TableName:KeyColumnName". Use the '*' for a table link that might make table cycles (eg. references another row in the same table)
+* **+TableName** or **\*TableName** - Link to a another table via it's key. If a foreign table has multiple keys, specify them with "+TableName:KeyColumnName". Use the '*' for a table link that might make table cycles (eg. references another row in the same table)
 
-* Bool, Int8/UInt8,Int16/UInt16,Int32/UInt32,Int64/UInt64,Float32/Float64 The type of the column. If no value is specified it is assumed to be a UTF8 string value. 
+* **bool**,**int8**/**uint8**,**int16**/**uint16**,**int32**/**uint32**,**int64**/**uint64**,**float32**/**float64** The type of the column. If no value is specified it is assumed to be a UTF8 string value. 
 
-* Min=Value and Max=Value - For value types, specify the valid range 
+* **min=Value** and **max=Value** - For value types, specify the valid range (eg min=5 max=6)
 
-* Ignore - This column is just notes or comments. To be ignored at runtime.
+* **ignore** - This column is just notes or comments. To be ignored at runtime.
 
 
 ## Special tables
@@ -48,7 +48,7 @@ Example table header.
 These tables are named starting with "Enum" and must have the columns: Name, Value and Comment
 eg:
 
-| Name Key| Value UInt8 | Comment |
+| Name key| Value uint8 | Comment |
 | ------- | ----------- | -----|
 |Easy|0|Easiest difficulty |
 |Medium|1|Standard difficulty |
@@ -76,19 +76,19 @@ As the database does not support values having a NULL value, one typical global 
 
 **EnumWeaponTypes.csv**
 
-| Name Key | Value UInt8 | Comment |
+| Name key | Value uint8 | Comment |
 | --------- | ----- | --|
 | None | 0 | A none type of weapon
 | Gun | 1 | A gun type of weapon
 
 **Weapons.csv**
-| Name Key | Type +EnumWeaponTypes |
+| Name key | Type +EnumWeaponTypes |
 | ------------- | ------------- |
 | None | None |
 | Phaser | Gun |
 
 **Characters.csv**
-| Name Key | LeftWeapon +Weapons | RightWeapon +Weapons
+| Name key | LeftWeapon +Weapons | RightWeapon +Weapons
 | ------------- | ------------- | -- |
 | Nerd | Phaser | None |
 
@@ -112,7 +112,7 @@ Some workflows load the CSV files into a simple DB like SQLite by creating table
 Once the database has been specified, you can run a custom generator program (eg. in python) to generate the database types, serialization code and do data validation. (Validate links and types)
 
 eg. This DB table
-| Name Key +EnumTypes| Value UInt8 | Link +Table2 // Table2 Link|
+| Name key +EnumTypes| Value uint8 | Link +Table2 // Table2 Link|
 | ------- | ----------- | -----|
 
 Could generate this code
