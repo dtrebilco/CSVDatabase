@@ -6,11 +6,11 @@
 #include <vector>
 #include <unordered_map>
 
-#define ERROR_MESSAGE(...) { char buf[256]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
+#define OUTPUT_MESSAGE(...) { char buf[256]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
 
 enum class ColumnType
 {
-  Unknown,
+  Unknown = 0,
 
   String,
   Bool,
@@ -24,7 +24,32 @@ enum class ColumnType
   UInt64,
   Float32,
   Float64,
+
+  ColumnType_Count
 };
+
+ColumnType GetColumnType(std::string_view name)
+{
+  if (name == "string") { return ColumnType::String; }
+  if (name == "bool") { return ColumnType::Bool; }
+
+  if (name == "int8") { return ColumnType::Int8; }
+  if (name == "int16") { return ColumnType::Int16; }
+  if (name == "int23") { return ColumnType::Int32; }
+  if (name == "int64") { return ColumnType::Int64; }
+
+  if (name == "uint8") { return ColumnType::UInt8; }
+  if (name == "uint16") { return ColumnType::UInt16; }
+  if (name == "uint23") { return ColumnType::UInt32; }
+  if (name == "uint64") { return ColumnType::UInt64; }
+
+  if (name == "float32") { return ColumnType::Float32; }
+  if (name == "float64") { return ColumnType::Float64; }
+
+  static_assert((int)ColumnType::ColumnType_Count == 13, "Update lookup");
+
+  return ColumnType::Unknown;
+}
 
 struct CSVHeader
 {
@@ -133,6 +158,113 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
 
   return csvTable;
 }
+/*
+struct CSVHeader
+{
+  std::string m_name;        // Name
+  ColumnType m_type = ColumnType::Unknown;// Type
+  bool m_isKey = false;      // Is Key
+  // Min
+  // Max
+  bool m_isIgnored = false;  // Is ignored
+  std::string m_foreignTable;// Foreign table link
+};
+*/
+
+bool ReadHeader(const std::string& field, CSVHeader& out)
+{
+  out = CSVHeader{};
+
+  std::string_view tags = field;
+
+  // Strip off any comment
+  size_t commentStart = field.find("//");
+  if (commentStart != std::string::npos)
+  {
+    out.m_comment = field.substr(commentStart + 2);
+    tags = tags.substr(0, commentStart);
+  }
+ 
+
+
+  do
+  {
+    // Strip off starting whitespace
+    tags = tags.substr(tags.find_first_not_of(' '));
+
+    // Get the next tag
+    std::string_view tag = tags.substr(0, tags.find_first_of(' '));
+    if (tag.size() > 0)
+    {
+      if (out.m_name.empty())
+      {
+        out.m_name = tag;
+      }
+      else if (tag[0] == '+' ||
+               tag[0] == '*')
+      {
+        out.m_foreignTable.assign(tag, 1, tag.size() - 1);
+
+        // DT_TODO: Assign multi key links help?
+      }
+      else if (tag == "key")
+      {
+        out.m_isKey = true;
+      }
+      else if (tag.starts_with("min="))
+      {
+        //out.m_min = atoi(&tag.c_str()[4]);
+        //out.m_minf = atof(&tag.c_str()[4]);
+        //out.m_hasMin = true;
+      }
+      else if (tag.starts_with("max="))
+      {
+        //out.m_max = atoi(&tag.c_str()[4]);
+        //out.m_maxf = atof(&tag.c_str()[4]);
+        //out.m_hasMax = true;
+      }
+      else
+      {
+        ColumnType newType = GetColumnType(tag);
+        if (newType != ColumnType::Unknown)
+        {
+          if (out.m_type != ColumnType::Unknown)
+          {
+            OUTPUT_MESSAGE("Duplicate types in field {}", field);
+            return false;
+          }
+          out.m_type = newType;
+        }
+        else
+        {
+          OUTPUT_MESSAGE("Unknown tag? {}", tag);
+        }
+      }
+
+      tags = tags.substr(tag.size());
+    }
+
+  } while (tags.size() > 0);
+
+
+  // Clamp limits based on the type
+
+
+  // If there is no type assigned, assign string
+  if (out.m_type == ColumnType::Unknown)
+  {
+    out.m_type = ColumnType::String;
+  }
+
+  // Abort if a name is not assigned
+  if (out.m_name.size() == 0)
+  {
+    OUTPUT_MESSAGE("Error: No column header name in ""{}""", field);
+    return false;
+  }
+
+  return true;
+}
 
 
 int main(int argc, char* argv[])
@@ -140,7 +272,7 @@ int main(int argc, char* argv[])
   // Check if directory path is provided
   if (argc != 2)
   {
-    ERROR_MESSAGE("Usage: CSVProcessor <directory_path>");
+    OUTPUT_MESSAGE("Usage: CSVProcessor <directory_path>");
     return 1;
   }
 
@@ -153,7 +285,7 @@ int main(int argc, char* argv[])
   if (!std::filesystem::exists(dirPath) ||
       !std::filesystem::is_directory(dirPathStatus))
   {
-    ERROR_MESSAGE("Error: {} is not a valid directory", dirPath);
+    OUTPUT_MESSAGE("Error: {} is not a valid directory", dirPath);
     return 1;
   }
 
@@ -175,7 +307,7 @@ int main(int argc, char* argv[])
         std::ifstream file(entry.path(), std::ios::binary);
         if (!file.is_open())
         {
-          ERROR_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
+          OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
           return 1;
         }
 
@@ -191,14 +323,14 @@ int main(int argc, char* argv[])
         file.read(csvFileData.data(), fileSize);
         if (!file)
         {
-          ERROR_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
+          OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
           return 1;
         }
 
         std::string tableName = entry.path().stem().string();
 
-        ERROR_MESSAGE("{}", entry.path().string().c_str());
-        ERROR_MESSAGE("{}", csvFileData.data());
+        OUTPUT_MESSAGE("{}", entry.path().string().c_str());
+        OUTPUT_MESSAGE("{}", csvFileData.data());
 
         std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.data());
         for (const auto& row : csvData)
@@ -213,7 +345,7 @@ int main(int argc, char* argv[])
         // Check that there is at least one row in addition to the header
         if (csvData.size() < 2)
         {
-          ERROR_MESSAGE("Error: Table {} does not have at least 2 rows", tableName);
+          OUTPUT_MESSAGE("Error: Table {} does not have at least 2 rows", tableName);
           return 1;
         }
 
@@ -223,7 +355,7 @@ int main(int argc, char* argv[])
         {
           if (csvData[i].size() != columnCount)
           {
-            ERROR_MESSAGE("Error: Table {} has column count not equal to header count {} != {}", tableName, csvData[i].size(), columnCount);
+            OUTPUT_MESSAGE("Error: Table {} has column count {} not equal to header count {} != {}", tableName, i, csvData[i].size(), columnCount);
             return 1;
           }
         }
@@ -231,6 +363,17 @@ int main(int argc, char* argv[])
         CSVTable newTable;
 
         // Check the header data of the table and parse it to a table entry
+        for (const std::string& header : csvData[0])
+        {
+          CSVHeader newHeader;
+          if (!ReadHeader(header, newHeader))
+          {
+            OUTPUT_MESSAGE("Error: Table {} has bad column header {}", tableName, header);
+            return 1;
+          }
+
+          newTable.m_headerData.push_back(std::move(newHeader));
+        }
 
         // Check that all table keys are unique
            // If a float or number - check that multiple representations are not made of the type (ie spaces)
