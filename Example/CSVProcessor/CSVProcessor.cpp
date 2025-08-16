@@ -53,15 +53,16 @@ ColumnType GetColumnType(std::string_view name)
 
 struct CSVHeader
 {
-  std::string m_name;        // Name
-  ColumnType m_type = ColumnType::Unknown;// Type
-  bool m_isKey = false;      // Is Key
-  // Min
-  // Max
+  std::string m_name;        // Column name
+  ColumnType m_type = ColumnType::Unknown;// Column type
+  bool m_isKey = false;      // Is table key
   bool m_isIgnored = false;  // Is ignored
-  std::string m_comment;     // Comment field
-  std::string m_foreignTable;// Foreign table link
-  std::string m_foreignTableKey;// Foreign table column key (can be empty if there is a single key)
+
+  std::string m_minValue;    // The min range string value (if any)
+  std::string m_maxValue;    // The max range string value (if any)
+
+  std::string m_comment;     // Comment field (if any)
+  std::string m_foreignTable;// Foreign table link (if any)
 };
 
 struct CSVTable
@@ -159,18 +160,6 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
 
   return csvTable;
 }
-/*
-struct CSVHeader
-{
-  std::string m_name;        // Name
-  ColumnType m_type = ColumnType::Unknown;// Type
-  bool m_isKey = false;      // Is Key
-  // Min
-  // Max
-  bool m_isIgnored = false;  // Is ignored
-  std::string m_foreignTable;// Foreign table link
-};
-*/
 
 bool ReadHeader(const std::string& field, CSVHeader& out)
 {
@@ -209,13 +198,6 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
         }
 
         out.m_foreignTable.assign(tag, 1, tag.size() - 1);
-
-        // Get of the foreign table column key is specified in the name
-        size_t startColumnName = out.m_name.find(':');
-        if (startColumnName != std::string::npos)
-        {
-          out.m_foreignTableKey = out.m_name.substr(startColumnName + 1);
-        }
       }
       else if (tag == "key")
       {
@@ -223,15 +205,11 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
       }
       else if (tag.starts_with("min="))
       {
-        //out.m_min = atoi(&tag.c_str()[4]);
-        //out.m_minf = atof(&tag.c_str()[4]);
-        //out.m_hasMin = true;
+        out.m_minValue = tag.substr(4);
       }
       else if (tag.starts_with("max="))
       {
-        //out.m_max = atoi(&tag.c_str()[4]);
-        //out.m_maxf = atof(&tag.c_str()[4]);
-        //out.m_hasMax = true;
+        out.m_maxValue = tag.substr(4);
       }
       else
       {
@@ -255,10 +233,6 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
     }
 
   } while (tags.size() > 0);
-
-
-  // Clamp limits based on the type
-
 
   // If there is no type assigned, assign string
   if (out.m_type == ColumnType::Unknown)
