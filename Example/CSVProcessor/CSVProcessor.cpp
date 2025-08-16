@@ -61,6 +61,7 @@ struct CSVHeader
   bool m_isIgnored = false;  // Is ignored
   std::string m_comment;     // Comment field
   std::string m_foreignTable;// Foreign table link
+  std::string m_foreignTableKey;// Foreign table column key (can be empty if there is a single key)
 };
 
 struct CSVTable
@@ -185,8 +186,6 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
     tags = tags.substr(0, commentStart);
   }
  
-
-
   do
   {
     // Strip off starting whitespace
@@ -203,9 +202,20 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
       else if (tag[0] == '+' ||
                tag[0] == '*')
       {
+        if (out.m_foreignTable.size() > 0)
+        {
+          OUTPUT_MESSAGE("Duplicate foreign tables in field {}", field);
+          return false;
+        }
+
         out.m_foreignTable.assign(tag, 1, tag.size() - 1);
 
-        // DT_TODO: Assign multi key links help?
+        // Get of the foreign table column key is specified in the name
+        size_t startColumnName = out.m_name.find(':');
+        if (startColumnName != std::string::npos)
+        {
+          out.m_foreignTableKey = out.m_name.substr(startColumnName + 1);
+        }
       }
       else if (tag == "key")
       {

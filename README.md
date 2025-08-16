@@ -33,7 +33,7 @@ Example table header.
 
 * **key** - Is a key value for this table.  There can be multiple keys columns in a table. The combination of all Key values need to be unique for a table.
 
-* **+TableName** or **\*TableName** - Link to a another table via it's key. If a foreign table has multiple keys, specify them with "+TableName:KeyColumnName". Use the '*' for a table link that might make table cycles (eg. references another row in the same table)
+* **+TableName** or **\*TableName** - Link to a another table via it's key. If a foreign table has multiple keys, specify them in the name of the column with "BaseName:TargetKeyColumnName". (eg. Link:Key1 Link:Key2) Use the '*' for a table link that might make table cycles (eg. references another row in the same table)
 
 * **bool**,**int8**/**uint8**,**int16**/**uint16**,**int32**/**uint32**,**int64**/**uint64**,**float32**/**float64** The type of the column. If no value is specified it is assumed to be a UTF8 string value. 
 
