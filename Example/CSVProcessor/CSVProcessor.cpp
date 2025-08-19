@@ -133,6 +133,31 @@ bool ParseNumber(ColumnType type, std::string_view string, NumberType& retNumber
   return true;
 }
 
+bool CompareLessThan(ColumnType type, NumberType a, NumberType b)
+{
+  switch (type)
+  {
+  case(ColumnType::Bool):    return a.Bool < b.Bool;
+
+  case(ColumnType::Int8):    return a.Int8 < b.Int8;
+  case(ColumnType::UInt8):   return a.UInt8 < b.UInt8;
+
+  case(ColumnType::Int16):   return a.Int16 < b.Int16;
+  case(ColumnType::UInt16):  return a.UInt16 < b.UInt16;
+
+  case(ColumnType::Int32):   return a.Int32 < b.Int32;
+  case(ColumnType::UInt32):  return a.UInt32 < b.UInt32;
+
+  case(ColumnType::Int64):   return a.Int64 < b.Int64;
+  case(ColumnType::UInt64):  return a.UInt64 < b.UInt64;
+
+  case(ColumnType::Float32): return a.Float32 < b.Float32;
+  case(ColumnType::Float64): return a.Float64 < b.Float64;
+  }
+
+  return false;
+}
+
 struct CSVHeader
 {
   std::string m_name;        // Column name
@@ -470,11 +495,36 @@ int main(int argc, char* argv[])
         {
           const CSVHeader& header = newTable.m_headerData[i];
 
+          // Only validate keys and numbers
+          if (!header.m_isKey && header.m_type == ColumnType::String)
+          {
+            continue;
+          }
+
           uniqueCheck.clear();
           uniqueFloatCheck.clear();
 
           // If there is a min/max range get it
+          NumberType minNumber;
+          if (header.m_minValue.size() > 0)
+          {
+            if (!ParseNumber(header.m_type, header.m_minValue, minNumber))
+            {
+              OUTPUT_MESSAGE("Error: Table {} has bad min value in column {} entry \"{}\"", tableName, header.m_name, header.m_minValue);
+              return 1;
+            }
+          }
+          NumberType maxNumber;
+          if (header.m_maxValue.size() > 0)
+          {
+            if (!ParseNumber(header.m_type, header.m_maxValue, maxNumber))
+            {
+              OUTPUT_MESSAGE("Error: Table {} has bad max value in column {} entry \"{}\"", tableName, header.m_name, header.m_maxValue);
+              return 1;
+            }
+          }
 
+          // Check all table data
           for (const std::vector<std::string>& row : newTable.m_rowData)
           {
             const std::string& entry = row[i];
@@ -496,12 +546,27 @@ int main(int argc, char* argv[])
               NumberType columnNumber;
               if (!ParseNumber(header.m_type, entry, columnNumber))
               {
-                OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\"", tableName, newTable.m_headerData[i].m_name, entry);
+                OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\"", tableName, header.m_name, entry);
                 return 1;
               }
 
               // Check min / max ranges
-
+              if (header.m_minValue.size() > 0)
+              {
+                if (CompareLessThan(header.m_type, columnNumber, minNumber))
+                {
+                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is less than min {}", tableName, header.m_name, entry, header.m_minValue);
+                  return 1;
+                }
+              }
+              if (header.m_maxValue.size() > 0)
+              {
+                if (CompareLessThan(header.m_type, maxNumber, columnNumber))
+                {
+                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is greater than max {} ", tableName, header.m_name, entry, header.m_maxValue);
+                  return 1;
+                }
+              }
 
               // Check duplicate key float values
               if (header.m_isKey && (header.m_type == ColumnType::Float64 || header.m_type == ColumnType::Float32))
