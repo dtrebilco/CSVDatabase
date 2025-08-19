@@ -4,7 +4,9 @@
 #include <format>
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include <unordered_map>
+#include <charconv>
 
 #define OUTPUT_MESSAGE(...) { char buf[256]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
 
@@ -51,6 +53,86 @@ ColumnType GetColumnType(std::string_view name)
   return ColumnType::Unknown;
 }
 
+union NumberType
+{
+  bool Bool;
+  
+  int8_t Int8;
+  uint8_t UInt8;
+  
+  int16_t Int16;
+  uint16_t UInt16;
+  
+  int32_t Int32;
+  uint32_t UInt32;
+  
+  int64_t Int64;
+  uint64_t UInt64;
+
+  float Float32;
+  double Float64;
+};
+
+bool ParseNumber(ColumnType type, std::string_view string, NumberType& retNumber)
+{
+  std::from_chars_result strRes;
+
+  const char* start = string.data();
+  const char* end = start + string.size();
+  switch (type)
+  {
+  case(ColumnType::Bool):    strRes = std::from_chars(start, end, retNumber.Int8); break; // Using Int8 for bool as temp measure
+
+  case(ColumnType::Int8):    strRes = std::from_chars(start, end, retNumber.Int8); break;
+  case(ColumnType::UInt8):   strRes = std::from_chars(start, end, retNumber.UInt8); break;
+
+  case(ColumnType::Int16):   strRes = std::from_chars(start, end, retNumber.Int16); break;
+  case(ColumnType::UInt16):  strRes = std::from_chars(start, end, retNumber.UInt16); break;
+
+  case(ColumnType::Int32):   strRes = std::from_chars(start, end, retNumber.Int32); break;
+  case(ColumnType::UInt32):  strRes = std::from_chars(start, end, retNumber.UInt32); break;
+
+  case(ColumnType::Int64):   strRes = std::from_chars(start, end, retNumber.Int64); break;
+  case(ColumnType::UInt64):  strRes = std::from_chars(start, end, retNumber.UInt64); break;
+
+  case(ColumnType::Float32): strRes = std::from_chars(start, end, retNumber.Float32); break;
+  case(ColumnType::Float64): strRes = std::from_chars(start, end, retNumber.Float64); break;
+  default:
+    return false;
+  }
+
+  if (strRes.ptr != end)
+  {
+    OUTPUT_MESSAGE("Error: String type {} has excess data \"{}\"", (int)type, string);
+    return false;
+  }
+
+  if (strRes.ec != std::errc())
+  {
+    OUTPUT_MESSAGE("Error: String type {} has error converting data \"{}\"", (int)type, string);
+    return false;
+  }
+
+  if (type == ColumnType::Bool)
+  {
+    if (retNumber.Int8 == 0)
+    {
+      retNumber.Bool = false;
+    }
+    else if (retNumber.Int8 == 1)
+    {
+      retNumber.Bool = true;
+    }
+    else
+    {
+      OUTPUT_MESSAGE("Error: String type bool has error converting data \"{}\"", string);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 struct CSVHeader
 {
   std::string m_name;        // Column name
@@ -90,6 +172,7 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
 
   while (c)
   {
+    // Note: This is allowing out-of-spec quotes to start and stop in a single field and not encompass the entire field
     if (inQuotes)
     {
       if (c == '"')
@@ -359,16 +442,81 @@ int main(int argc, char* argv[])
           newTable.m_headerData.push_back(std::move(newHeader));
         }
 
-        // Check that all table keys are unique
-           // If a float or number - check that multiple representations are not made of the type (ie spaces)
-
-        // Check that the types are valid and in range
-
         // Copy all row data over
         newTable.m_rowData.reserve(csvData.size() - 1);
         for (size_t i = 1; i < csvData.size(); i++)
         {
           newTable.m_rowData.push_back(std::move(csvData[i]));
+        }
+
+        // Check that all column names are unique
+        {
+          std::unordered_set<std::string> uniqueCheck;
+          for (const CSVHeader& header : newTable.m_headerData)
+          {
+            if (uniqueCheck.contains(header.m_name))
+            {
+              OUTPUT_MESSAGE("Error: Table {} has duplicate column name {}", tableName, header.m_name);
+              return 1;
+            }
+            uniqueCheck.insert(header.m_name);
+          }
+        }
+
+        // Validate keys and all numbers
+        std::unordered_set<std::string> uniqueCheck;
+        std::unordered_set<double> uniqueFloatCheck;
+        for (size_t i = 0; i < newTable.m_headerData.size(); i++)
+        {
+          const CSVHeader& header = newTable.m_headerData[i];
+
+          uniqueCheck.clear();
+          uniqueFloatCheck.clear();
+
+          // If there is a min/max range get it
+
+          for (const std::vector<std::string>& row : newTable.m_rowData)
+          {
+            const std::string& entry = row[i];
+
+            // Check for duplicates
+            if (header.m_isKey)
+            {
+              if (uniqueCheck.contains(entry))
+              {
+                OUTPUT_MESSAGE("Error: Table {} has duplicate key in column name {} \"{}\"", tableName, header.m_name, entry);
+                return 1;
+              }
+              uniqueCheck.insert(entry);
+            }
+
+            if (header.m_type != ColumnType::String)
+            {
+              // Attempt conversion
+              NumberType columnNumber;
+              if (!ParseNumber(header.m_type, entry, columnNumber))
+              {
+                OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\"", tableName, newTable.m_headerData[i].m_name, entry);
+                return 1;
+              }
+
+              // Check min / max ranges
+
+
+              // Check duplicate key float values
+              if (header.m_isKey && (header.m_type == ColumnType::Float64 || header.m_type == ColumnType::Float32))
+              {
+                double testFloat = header.m_type == ColumnType::Float64 ? columnNumber.Float64 : columnNumber.Float32;
+
+                if (uniqueFloatCheck.contains(testFloat))
+                {
+                  OUTPUT_MESSAGE("Error: Table {} has duplicate key in column name {} \"{}\"", tableName, header.m_name, entry);
+                  return 1;
+                }
+                uniqueFloatCheck.insert(testFloat);
+              }
+            }
+          }
         }
 
         // Add to a hashmap of all the csv files
@@ -379,6 +527,11 @@ int main(int argc, char* argv[])
   }
 
   // Check that the table references match up
+
+     // Check foreign keys that are numbers, do the number check again
+
+  // If checking table layout - sort by table keys, save out removal of extra spaces
+
 
   // Add code gen of runtime types
 
