@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <charconv>
+#include <variant>
+#include <algorithm>
 
 #define OUTPUT_MESSAGE(...) { char buf[256]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
 
@@ -53,50 +55,130 @@ ColumnType GetColumnType(std::string_view name)
   return ColumnType::Unknown;
 }
 
-union NumberType
-{
-  bool Bool;
-  
-  int8_t Int8;
-  uint8_t UInt8;
-  
-  int16_t Int16;
-  uint16_t UInt16;
-  
-  int32_t Int32;
-  uint32_t UInt32;
-  
-  int64_t Int64;
-  uint64_t UInt64;
+using FieldType = std::variant<std::string, bool, int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t, uint64_t, float, double>;
 
-  float Float32;
-  double Float64;
-};
-
-bool ParseNumber(ColumnType type, std::string_view string, NumberType& retNumber)
+std::string to_string(const FieldType& var)
 {
+  return std::visit([]<typename T>(const T & e)
+  {
+    if constexpr (std::is_same_v<T, std::string>)
+    {
+      return e;
+    }
+    else // float/int
+    { 
+      return std::to_string(e);
+    }
+  }, var);
+}
+
+bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
+{
+  if (type == ColumnType::String)
+  {
+    retNumber = std::string(string);
+    return true;
+  }
+
   std::from_chars_result strRes;
 
   const char* start = string.data();
   const char* end = start + string.size();
   switch (type)
   {
-  case(ColumnType::Bool):    strRes = std::from_chars(start, end, retNumber.Int8); break; // Using Int8 for bool as temp measure
+  case(ColumnType::Bool):
+  {
+    int8_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    if (val == 0)
+    {
+      retNumber = false;
+    }
+    else if (val == 1)
+    {
+      retNumber = true;
+    }
+    else
+    {
+      OUTPUT_MESSAGE("Error: String type bool has error converting data \"{}\"", string);
+      return false;
+    }
+    break;
+  }
 
-  case(ColumnType::Int8):    strRes = std::from_chars(start, end, retNumber.Int8); break;
-  case(ColumnType::UInt8):   strRes = std::from_chars(start, end, retNumber.UInt8); break;
+  case(ColumnType::Int8):
+  {
+    int8_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
+  case(ColumnType::UInt8):
+  {
+    uint8_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
+  case(ColumnType::Int16):
+  {
+    int16_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
+  case(ColumnType::UInt16):
+  {
+    uint16_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
 
-  case(ColumnType::Int16):   strRes = std::from_chars(start, end, retNumber.Int16); break;
-  case(ColumnType::UInt16):  strRes = std::from_chars(start, end, retNumber.UInt16); break;
+  case(ColumnType::Int32): 
+  { 
+    int32_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break; 
+  }
+  case(ColumnType::UInt32):
+  {  
+    uint32_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
 
-  case(ColumnType::Int32):   strRes = std::from_chars(start, end, retNumber.Int32); break;
-  case(ColumnType::UInt32):  strRes = std::from_chars(start, end, retNumber.UInt32); break;
+  case(ColumnType::Int64): 
+  { 
+    int64_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break; 
+  }
+  case(ColumnType::UInt64):
+  { 
+    uint64_t val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
 
-  case(ColumnType::Int64):   strRes = std::from_chars(start, end, retNumber.Int64); break;
-  case(ColumnType::UInt64):  strRes = std::from_chars(start, end, retNumber.UInt64); break;
-
-  case(ColumnType::Float32): strRes = std::from_chars(start, end, retNumber.Float32); break;
-  case(ColumnType::Float64): strRes = std::from_chars(start, end, retNumber.Float64); break;
+  case(ColumnType::Float32):
+  { 
+    float val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
+  case(ColumnType::Float64): 
+  { 
+    double val = 0;
+    strRes = std::from_chars(start, end, val);
+    retNumber = val;
+    break;
+  }
   default:
     return false;
   }
@@ -113,49 +195,7 @@ bool ParseNumber(ColumnType type, std::string_view string, NumberType& retNumber
     return false;
   }
 
-  if (type == ColumnType::Bool)
-  {
-    if (retNumber.Int8 == 0)
-    {
-      retNumber.Bool = false;
-    }
-    else if (retNumber.Int8 == 1)
-    {
-      retNumber.Bool = true;
-    }
-    else
-    {
-      OUTPUT_MESSAGE("Error: String type bool has error converting data \"{}\"", string);
-      return false;
-    }
-  }
-
   return true;
-}
-
-bool CompareLessThan(ColumnType type, NumberType a, NumberType b)
-{
-  switch (type)
-  {
-  case(ColumnType::Bool):    return a.Bool < b.Bool;
-
-  case(ColumnType::Int8):    return a.Int8 < b.Int8;
-  case(ColumnType::UInt8):   return a.UInt8 < b.UInt8;
-
-  case(ColumnType::Int16):   return a.Int16 < b.Int16;
-  case(ColumnType::UInt16):  return a.UInt16 < b.UInt16;
-
-  case(ColumnType::Int32):   return a.Int32 < b.Int32;
-  case(ColumnType::UInt32):  return a.UInt32 < b.UInt32;
-
-  case(ColumnType::Int64):   return a.Int64 < b.Int64;
-  case(ColumnType::UInt64):  return a.UInt64 < b.UInt64;
-
-  case(ColumnType::Float32): return a.Float32 < b.Float32;
-  case(ColumnType::Float64): return a.Float64 < b.Float64;
-  }
-
-  return false;
 }
 
 struct CSVHeader
@@ -174,8 +214,10 @@ struct CSVHeader
 
 struct CSVTable
 {
-  std::vector<CSVHeader> m_headerData;
-  std::vector<std::vector<std::string>> m_rowData;
+  std::vector<CSVHeader> m_headerData; // Header data that is info for each column
+  std::vector<uint32_t> m_keyColumns;  // Index of the columns that are keys in the table
+
+  std::vector<std::vector<FieldType>> m_rowData;
 };
 
 std::unordered_map<std::string, CSVTable> g_tables;
@@ -311,6 +353,10 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
       {
         out.m_isKey = true;
       }
+      else if (tag == "ignore")
+      {
+        out.m_isIgnored = true;
+      }
       else if (tag.starts_with("min="))
       {
         out.m_minValue = tag.substr(4);
@@ -346,6 +392,17 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
   if (out.m_type == ColumnType::Unknown)
   {
     out.m_type = ColumnType::String;
+  }
+
+  // If ignored, reset values
+  if (out.m_isIgnored)
+  {
+    out.m_isKey = false;
+    out.m_type = ColumnType::String;
+    out.m_foreignTable.clear();
+    out.m_comment.clear();
+    out.m_minValue.clear();
+    out.m_maxValue.clear();
   }
 
   // Abort if a name is not assigned
@@ -442,7 +499,7 @@ int main(int argc, char* argv[])
         }
 
         // Check all columns have the same count
-        size_t columnCount = csvData[0].size();
+        const size_t columnCount = csvData[0].size();
         for (size_t i = 1; i < csvData.size(); i++)
         {
           if (csvData[i].size() != columnCount)
@@ -455,8 +512,11 @@ int main(int argc, char* argv[])
         CSVTable newTable;
 
         // Check the header data of the table and parse it to a table entry
-        for (const std::string& header : csvData[0])
+        newTable.m_headerData.reserve(columnCount);
+        for (uint32_t i = 0; i < columnCount; i++)
         {
+          const std::string& header = csvData[0][i];
+
           CSVHeader newHeader;
           if (!ReadHeader(header, newHeader))
           {
@@ -464,19 +524,17 @@ int main(int argc, char* argv[])
             return 1;
           }
 
-          newTable.m_headerData.push_back(std::move(newHeader));
-        }
+          if (newHeader.m_isKey)
+          {
+            newTable.m_keyColumns.push_back(i);
+          }
 
-        // Copy all row data over
-        newTable.m_rowData.reserve(csvData.size() - 1);
-        for (size_t i = 1; i < csvData.size(); i++)
-        {
-          newTable.m_rowData.push_back(std::move(csvData[i]));
+          newTable.m_headerData.push_back(std::move(newHeader));
         }
 
         // Check that all column names are unique
         {
-          std::unordered_set<std::string> uniqueCheck;
+          std::unordered_set<std::string_view> uniqueCheck;
           for (const CSVHeader& header : newTable.m_headerData)
           {
             if (uniqueCheck.contains(header.m_name))
@@ -488,36 +546,31 @@ int main(int argc, char* argv[])
           }
         }
 
-        // Validate keys and all numbers
-        std::unordered_set<std::string> uniqueCheck;
-        std::unordered_set<double> uniqueFloatCheck;
-        for (size_t i = 0; i < newTable.m_headerData.size(); i++)
+        // Copy all row data over
+        newTable.m_rowData.resize(csvData.size() - 1);
+        for (std::vector<FieldType>& row : newTable.m_rowData)
         {
-          const CSVHeader& header = newTable.m_headerData[i];
+          row.resize(columnCount);
+        }
 
-          // Only validate keys and numbers
-          if (!header.m_isKey && header.m_type == ColumnType::String)
-          {
-            continue;
-          }
-
-          uniqueCheck.clear();
-          uniqueFloatCheck.clear();
+        for (size_t h = 0; h < columnCount; h++)
+        {
+          const CSVHeader& header = newTable.m_headerData[h];
 
           // If there is a min/max range get it
-          NumberType minNumber;
+          FieldType minNumber;
           if (header.m_minValue.size() > 0)
           {
-            if (!ParseNumber(header.m_type, header.m_minValue, minNumber))
+            if (!ParseField(header.m_type, header.m_minValue, minNumber))
             {
               OUTPUT_MESSAGE("Error: Table {} has bad min value in column {} entry \"{}\"", tableName, header.m_name, header.m_minValue);
               return 1;
             }
           }
-          NumberType maxNumber;
+          FieldType maxNumber;
           if (header.m_maxValue.size() > 0)
           {
-            if (!ParseNumber(header.m_type, header.m_maxValue, maxNumber))
+            if (!ParseField(header.m_type, header.m_maxValue, maxNumber))
             {
               OUTPUT_MESSAGE("Error: Table {} has bad max value in column {} entry \"{}\"", tableName, header.m_name, header.m_maxValue);
               return 1;
@@ -525,35 +578,24 @@ int main(int argc, char* argv[])
           }
 
           // Check all table data
-          for (const std::vector<std::string>& row : newTable.m_rowData)
+          for (size_t i = 1; i < csvData.size(); i++)
           {
-            const std::string& entry = row[i];
+            const std::string& entry = csvData[i][h];
+            FieldType& columnField = newTable.m_rowData[i - 1][h];
 
-            // Check for duplicates
-            if (header.m_isKey)
+            // Attempt conversion
+            if (!ParseField(header.m_type, entry, columnField))
             {
-              if (uniqueCheck.contains(entry))
-              {
-                OUTPUT_MESSAGE("Error: Table {} has duplicate key in column name {} \"{}\"", tableName, header.m_name, entry);
-                return 1;
-              }
-              uniqueCheck.insert(entry);
+              OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\"", tableName, header.m_name, entry);
+              return 1;
             }
 
             if (header.m_type != ColumnType::String)
             {
-              // Attempt conversion
-              NumberType columnNumber;
-              if (!ParseNumber(header.m_type, entry, columnNumber))
-              {
-                OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\"", tableName, header.m_name, entry);
-                return 1;
-              }
-
               // Check min / max ranges
               if (header.m_minValue.size() > 0)
               {
-                if (CompareLessThan(header.m_type, columnNumber, minNumber))
+                if (columnField < minNumber)
                 {
                   OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is less than min {}", tableName, header.m_name, entry, header.m_minValue);
                   return 1;
@@ -561,28 +603,66 @@ int main(int argc, char* argv[])
               }
               if (header.m_maxValue.size() > 0)
               {
-                if (CompareLessThan(header.m_type, maxNumber, columnNumber))
+                if (columnField > maxNumber)
                 {
                   OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is greater than max {} ", tableName, header.m_name, entry, header.m_maxValue);
                   return 1;
                 }
               }
-
-              // Check duplicate key float values
-              if (header.m_isKey && (header.m_type == ColumnType::Float64 || header.m_type == ColumnType::Float32))
-              {
-                double testFloat = header.m_type == ColumnType::Float64 ? columnNumber.Float64 : columnNumber.Float32;
-
-                if (uniqueFloatCheck.contains(testFloat))
-                {
-                  OUTPUT_MESSAGE("Error: Table {} has duplicate key in column name {} \"{}\"", tableName, header.m_name, entry);
-                  return 1;
-                }
-                uniqueFloatCheck.insert(testFloat);
-              }
             }
           }
         }
+
+        // Sort by the keys, check if duplicate rows
+        if (newTable.m_keyColumns.size() > 0 && newTable.m_rowData.size() > 1)
+        {
+          std::sort(newTable.m_rowData.begin(), newTable.m_rowData.end(),
+            [&newTable](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+            {
+              for (uint32_t index : newTable.m_keyColumns)
+              {
+                if (a[index] < b[index])
+                {
+                  return true;
+                }
+                if (a[index] != b[index])
+                {
+                  break;
+                }
+              }
+              return false;
+            });
+
+
+          // Loop and check for duplicate rows
+          for (size_t r = 1; r < newTable.m_rowData.size(); r++)
+          {
+            const std::vector<FieldType>& prev = newTable.m_rowData[r - 1];
+            const std::vector<FieldType>& curr = newTable.m_rowData[r];
+
+            bool duplicate = true;
+            for (uint32_t index : newTable.m_keyColumns)
+            {
+              if (curr[index] != prev[index])
+              {
+                duplicate = false;
+                break;
+              }
+            }
+            if (duplicate)
+            {
+              std::string errorKeys;
+              for (uint32_t index : newTable.m_keyColumns)
+              {
+                errorKeys += to_string(curr[index]) + " ";
+              }
+              OUTPUT_MESSAGE("Error: Table {} has duplicate keys {}", tableName, errorKeys);
+              return 1;
+            }
+          }
+        }
+
+        // If checking table layout - format and compare against source
 
         // Add to a hashmap of all the csv files
         g_tables[tableName] = std::move(newTable);
@@ -592,10 +672,27 @@ int main(int argc, char* argv[])
   }
 
   // Check that the table references match up
+  for (const auto& [tableName, table] : g_tables)
+  {
+    // Check the table for foreign links
 
-     // Check foreign keys that are numbers, do the number check again
+      // Check if this column is already processed
 
-  // If checking table layout - sort by table keys, save out removal of extra spaces
+      // Check foreign table exists
+
+      // Check how many keys in the foreign table
+
+      // Check if column name specified
+
+          // Find column in the target table
+
+      // Else find column name (check if only one key)
+
+      // std::lower_bound
+      
+
+    // Check foreign keys that are numbers, do the number check again
+  }
 
 
   // Add code gen of runtime types
@@ -607,3 +704,6 @@ int main(int argc, char* argv[])
 
   return 0;
 }
+
+
+// TODO: Add test where the key is a foreign key - part of a multi key also
