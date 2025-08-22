@@ -72,11 +72,11 @@ std::string to_string(const FieldType& var)
   }, var);
 }
 
-bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
+bool ParseField(ColumnType type, std::string_view string, FieldType& retField)
 {
   if (type == ColumnType::String)
   {
-    retNumber = std::string(string);
+    retField = std::string(string);
     return true;
   }
 
@@ -92,11 +92,11 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
     strRes = std::from_chars(start, end, val);
     if (val == 0)
     {
-      retNumber = false;
+      retField = false;
     }
     else if (val == 1)
     {
-      retNumber = true;
+      retField = true;
     }
     else
     {
@@ -110,28 +110,28 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
   {
     int8_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
   case(ColumnType::UInt8):
   {
     uint8_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
   case(ColumnType::Int16):
   {
     int16_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
   case(ColumnType::UInt16):
   {
     uint16_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
 
@@ -139,14 +139,14 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
   { 
     int32_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break; 
   }
   case(ColumnType::UInt32):
   {  
     uint32_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
 
@@ -154,14 +154,14 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
   { 
     int64_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break; 
   }
   case(ColumnType::UInt64):
   { 
     uint64_t val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
 
@@ -169,17 +169,18 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
   { 
     float val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
   case(ColumnType::Float64): 
   { 
     double val = 0;
     strRes = std::from_chars(start, end, val);
-    retNumber = val;
+    retField = val;
     break;
   }
   default:
+    OUTPUT_MESSAGE("Error: String type {} is unknown for \"{}\"", (int)type, string);
     return false;
   }
 
@@ -196,6 +197,17 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retNumber)
   }
 
   return true;
+}
+
+bool ParseFieldMove(ColumnType type, std::string&& string, FieldType& retField)
+{
+  if (type == ColumnType::String)
+  {
+    retField = std::move(string);
+    return true;
+  }
+
+  return ParseField(type, string, retField);
 }
 
 struct CSVHeader
@@ -580,13 +592,12 @@ int main(int argc, char* argv[])
           // Check all table data
           for (size_t i = 1; i < csvData.size(); i++)
           {
-            const std::string& entry = csvData[i][h];
             FieldType& columnField = newTable.m_rowData[i - 1][h];
 
             // Attempt conversion
-            if (!ParseField(header.m_type, entry, columnField))
+            if (!ParseFieldMove(header.m_type, std::move(csvData[i][h]), columnField))
             {
-              OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\"", tableName, header.m_name, entry);
+              OUTPUT_MESSAGE("Error: Table {} has bad data in column {}", tableName, header.m_name);
               return 1;
             }
 
@@ -597,7 +608,7 @@ int main(int argc, char* argv[])
               {
                 if (columnField < minNumber)
                 {
-                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is less than min {}", tableName, header.m_name, entry, header.m_minValue);
+                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is less than min {}", tableName, header.m_name, to_string(columnField), header.m_minValue);
                   return 1;
                 }
               }
@@ -605,7 +616,7 @@ int main(int argc, char* argv[])
               {
                 if (columnField > maxNumber)
                 {
-                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is greater than max {} ", tableName, header.m_name, entry, header.m_maxValue);
+                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is greater than max {} ", tableName, header.m_name, to_string(columnField), header.m_maxValue);
                   return 1;
                 }
               }
