@@ -465,45 +465,35 @@ int main(int argc, char* argv[])
         std::tolower(extension[3]) == 'v')
       {
         // Open the file in binary mode to avoid newline conversions
-        std::ifstream file(entry.path(), std::ios::binary);
-        if (!file.is_open())
         {
-          OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
-          return 1;
-        }
-
-        // Seek to the end to determine file size
-        file.seekg(0, std::ios::end);
-        size_t fileSize = file.tellg();
-        file.seekg(0, std::ios::beg);
-
-        // Read into a buffer
-        csvFileData.resize(fileSize + 1);
-        csvFileData[fileSize] = 0; // Add null terminator
-
-        file.read(csvFileData.data(), fileSize);
-        if (!file)
-        {
-          OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
-          return 1;
-        }
-
-        std::string tableName = entry.path().stem().string();
-
-        OUTPUT_MESSAGE("{}", entry.path().string().c_str());
-        OUTPUT_MESSAGE("{}", csvFileData.data());
-
-        std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.data());
-        for (const auto& row : csvData)
-        {
-          for (const auto& item : row)
+          std::ifstream file(entry.path(), std::ios::binary);
+          if (!file.is_open())
           {
-            printf("%s,", item.c_str());
+            OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
+            return 1;
           }
-          printf("\n");
+
+          // Seek to the end to determine file size
+          file.seekg(0, std::ios::end);
+          size_t fileSize = file.tellg();
+          file.seekg(0, std::ios::beg);
+
+          // Read into a buffer
+          csvFileData.resize(fileSize + 1);
+          csvFileData[fileSize] = 0; // Add null terminator
+
+          file.read(csvFileData.data(), fileSize);
+          if (!file)
+          {
+            OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
+            return 1;
+          }
+          file.close();
         }
+        std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.data());
 
         // Check that there is at least one row in addition to the header
+        std::string tableName = entry.path().stem().string();
         if (csvData.size() < 2)
         {
           OUTPUT_MESSAGE("Error: Table {} does not have at least 2 rows", tableName);
