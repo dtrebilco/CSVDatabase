@@ -682,9 +682,12 @@ int main(int argc, char* argv[])
   }
 
   // Check that the table references match up
+  std::vector<bool> processed;
+  std::vector<uint32_t> matchIndices;
   for (const auto& [tableName, table] : g_tables)
   {
-    std::vector<bool> processed;
+    // Reset the processed array
+    processed.resize(0);
     processed.resize(table.m_headerData.size());
 
     // Check the table for foreign links
@@ -715,7 +718,7 @@ int main(int argc, char* argv[])
       std::string_view baseName = std::string_view(header.m_name).substr(0, header.m_name.find_first_of(':'));
 
       // If only one foreign key, check for optional foreign table column name
-      std::vector<uint32_t> matchIndices;
+      matchIndices.resize(0);
       if (foreignTable.m_keyColumns.size() == 1 && baseName == header.m_name)
       {
         // If only the base name, 
