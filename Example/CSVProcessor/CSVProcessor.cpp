@@ -684,6 +684,7 @@ int main(int argc, char* argv[])
   // Check that the table references match up
   std::vector<bool> processed;
   std::vector<uint32_t> matchIndices;
+  std::string searchName;
   for (const auto& [tableName, table] : g_tables)
   {
     // Reset the processed array
@@ -714,12 +715,12 @@ int main(int argc, char* argv[])
         return 1;
       }
 
-      // Get the base name
-      std::string_view baseName = std::string_view(header.m_name).substr(0, header.m_name.find_first_of(':'));
+      // Get the base name end position
+      size_t headerSplitIndex = header.m_name.find_first_of(':');
 
       // If only one foreign key, check for optional foreign table column name
       matchIndices.resize(0);
-      if (foreignTable.m_keyColumns.size() == 1 && baseName == header.m_name)
+      if (foreignTable.m_keyColumns.size() == 1 && headerSplitIndex == std::string::npos)
       {
         // If only the base name, 
         matchIndices.push_back(h);
@@ -729,9 +730,9 @@ int main(int argc, char* argv[])
         // Find each base name+ foreign key name
         for (uint32_t foreignKeyColumn : foreignTable.m_keyColumns)
         {
-          std::string searchName;
-          searchName.assign(baseName);
-          searchName += ":" + foreignTable.m_headerData[foreignKeyColumn].m_name;
+          searchName.assign(header.m_name, 0, headerSplitIndex);
+          searchName += ":";
+          searchName += foreignTable.m_headerData[foreignKeyColumn].m_name;
 
           int32_t foundIndex = -1;
           for (uint32_t i = 0; i < table.m_headerData.size(); i++)
