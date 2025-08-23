@@ -427,250 +427,181 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
   return true;
 }
 
-
-int main(int argc, char* argv[])
+bool ReadTable(const char* fileString, CSVTable& newTable)
 {
-  // Check if directory path is provided
-  if (argc != 2)
+  // Check that there is at least one row in addition to the header
+  std::vector<std::vector<std::string>> csvData = readCSV(fileString);
+  if (csvData.size() < 2)
   {
-    OUTPUT_MESSAGE("Usage: CSVProcessor <directory_path>");
-    return 1;
+    OUTPUT_MESSAGE("Error: Table does not have at least 2 rows");
+    return false;
   }
 
-  // Get directory path from command line
-  const char* dirPath = argv[1];
-
-  // Check if directory exists
-  std::error_code error;
-  std::filesystem::file_status dirPathStatus = std::filesystem::status(dirPath, error);
-  if (!std::filesystem::exists(dirPath) ||
-      !std::filesystem::is_directory(dirPathStatus))
+  // Check all columns have the same count
+  const size_t columnCount = csvData[0].size();
+  for (size_t i = 1; i < csvData.size(); i++)
   {
-    OUTPUT_MESSAGE("Error: {} is not a valid directory", dirPath);
-    return 1;
-  }
-
-  // Iterate through directory
-  std::vector<char> csvFileData;
-  for (const auto& entry : std::filesystem::directory_iterator(dirPath))
-  {
-    if (entry.is_regular_file())
+    if (csvData[i].size() != columnCount)
     {
-      // Check if file has .csv extension
-      std::string extension = entry.path().extension().string();
-      if (extension.size() == 4 &&
-        std::tolower(extension[0]) == '.' &&
-        std::tolower(extension[1]) == 'c' &&
-        std::tolower(extension[2]) == 's' &&
-        std::tolower(extension[3]) == 'v')
+      OUTPUT_MESSAGE("Error: Table has column count {} not equal to header count {} != {}", i, csvData[i].size(), columnCount);
+      return false;
+    }
+  }
+
+  // Check the header data of the table and parse it to a table entry
+  newTable.m_headerData.reserve(columnCount);
+  for (uint32_t i = 0; i < columnCount; i++)
+  {
+    const std::string& header = csvData[0][i];
+
+    CSVHeader newHeader;
+    if (!ReadHeader(header, newHeader))
+    {
+      OUTPUT_MESSAGE("Error: Table has bad column header {}", header);
+      return false;
+    }
+
+    if (newHeader.m_isKey)
+    {
+      newTable.m_keyColumns.push_back(i);
+    }
+
+    newTable.m_headerData.push_back(std::move(newHeader));
+  }
+
+  // Check that all column names are unique
+  {
+    std::unordered_set<std::string_view> uniqueCheck;
+    for (const CSVHeader& header : newTable.m_headerData)
+    {
+      if (uniqueCheck.contains(header.m_name))
       {
-        // Open the file in binary mode to avoid newline conversions
+        OUTPUT_MESSAGE("Error: Table has duplicate column name {}", header.m_name);
+        return false;
+      }
+      uniqueCheck.insert(header.m_name);
+    }
+  }
+
+  // Copy all row data over
+  newTable.m_rowData.resize(csvData.size() - 1);
+  for (std::vector<FieldType>& row : newTable.m_rowData)
+  {
+    row.resize(columnCount);
+  }
+
+  for (size_t h = 0; h < columnCount; h++)
+  {
+    const CSVHeader& header = newTable.m_headerData[h];
+
+    // If there is a min/max range get it
+    FieldType minNumber;
+    if (header.m_minValue.size() > 0)
+    {
+      if (!ParseField(header.m_type, header.m_minValue, minNumber))
+      {
+        OUTPUT_MESSAGE("Error: Table has bad min value in column {} entry \"{}\"", header.m_name, header.m_minValue);
+        return false;
+      }
+    }
+    FieldType maxNumber;
+    if (header.m_maxValue.size() > 0)
+    {
+      if (!ParseField(header.m_type, header.m_maxValue, maxNumber))
+      {
+        OUTPUT_MESSAGE("Error: Table has bad max value in column {} entry \"{}\"", header.m_name, header.m_maxValue);
+        return false;
+      }
+    }
+
+    // Check all table data
+    for (size_t i = 1; i < csvData.size(); i++)
+    {
+      FieldType& columnField = newTable.m_rowData[i - 1][h];
+
+      // Attempt conversion
+      if (!ParseFieldMove(header.m_type, std::move(csvData[i][h]), columnField))
+      {
+        OUTPUT_MESSAGE("Error: Table has bad data in column {}", header.m_name);
+        return false;
+      }
+
+      if (header.m_type != ColumnType::String)
+      {
+        // Check min / max ranges
+        if (header.m_minValue.size() > 0)
         {
-          std::ifstream file(entry.path(), std::ios::binary);
-          if (!file.is_open())
+          if (columnField < minNumber)
           {
-            OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
-            return 1;
-          }
-
-          // Seek to the end to determine file size
-          file.seekg(0, std::ios::end);
-          size_t fileSize = file.tellg();
-          file.seekg(0, std::ios::beg);
-
-          // Read into a buffer
-          csvFileData.resize(fileSize + 1);
-          csvFileData[fileSize] = 0; // Add null terminator
-
-          file.read(csvFileData.data(), fileSize);
-          if (!file)
-          {
-            OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
-            return 1;
-          }
-          file.close();
-        }
-        std::vector<std::vector<std::string>> csvData = readCSV(csvFileData.data());
-
-        // Check that there is at least one row in addition to the header
-        std::string tableName = entry.path().stem().string();
-        if (csvData.size() < 2)
-        {
-          OUTPUT_MESSAGE("Error: Table {} does not have at least 2 rows", tableName);
-          return 1;
-        }
-
-        // Check all columns have the same count
-        const size_t columnCount = csvData[0].size();
-        for (size_t i = 1; i < csvData.size(); i++)
-        {
-          if (csvData[i].size() != columnCount)
-          {
-            OUTPUT_MESSAGE("Error: Table {} has column count {} not equal to header count {} != {}", tableName, i, csvData[i].size(), columnCount);
-            return 1;
-          }
-        }
-
-        CSVTable newTable;
-
-        // Check the header data of the table and parse it to a table entry
-        newTable.m_headerData.reserve(columnCount);
-        for (uint32_t i = 0; i < columnCount; i++)
-        {
-          const std::string& header = csvData[0][i];
-
-          CSVHeader newHeader;
-          if (!ReadHeader(header, newHeader))
-          {
-            OUTPUT_MESSAGE("Error: Table {} has bad column header {}", tableName, header);
-            return 1;
-          }
-
-          if (newHeader.m_isKey)
-          {
-            newTable.m_keyColumns.push_back(i);
-          }
-
-          newTable.m_headerData.push_back(std::move(newHeader));
-        }
-
-        // Check that all column names are unique
-        {
-          std::unordered_set<std::string_view> uniqueCheck;
-          for (const CSVHeader& header : newTable.m_headerData)
-          {
-            if (uniqueCheck.contains(header.m_name))
-            {
-              OUTPUT_MESSAGE("Error: Table {} has duplicate column name {}", tableName, header.m_name);
-              return 1;
-            }
-            uniqueCheck.insert(header.m_name);
+            OUTPUT_MESSAGE("Error: Table has bad data in column {} entry \"{}\" is less than min {}", header.m_name, to_string(columnField), header.m_minValue);
+            return false;
           }
         }
-
-        // Copy all row data over
-        newTable.m_rowData.resize(csvData.size() - 1);
-        for (std::vector<FieldType>& row : newTable.m_rowData)
+        if (header.m_maxValue.size() > 0)
         {
-          row.resize(columnCount);
-        }
-
-        for (size_t h = 0; h < columnCount; h++)
-        {
-          const CSVHeader& header = newTable.m_headerData[h];
-
-          // If there is a min/max range get it
-          FieldType minNumber;
-          if (header.m_minValue.size() > 0)
+          if (columnField > maxNumber)
           {
-            if (!ParseField(header.m_type, header.m_minValue, minNumber))
-            {
-              OUTPUT_MESSAGE("Error: Table {} has bad min value in column {} entry \"{}\"", tableName, header.m_name, header.m_minValue);
-              return 1;
-            }
-          }
-          FieldType maxNumber;
-          if (header.m_maxValue.size() > 0)
-          {
-            if (!ParseField(header.m_type, header.m_maxValue, maxNumber))
-            {
-              OUTPUT_MESSAGE("Error: Table {} has bad max value in column {} entry \"{}\"", tableName, header.m_name, header.m_maxValue);
-              return 1;
-            }
-          }
-
-          // Check all table data
-          for (size_t i = 1; i < csvData.size(); i++)
-          {
-            FieldType& columnField = newTable.m_rowData[i - 1][h];
-
-            // Attempt conversion
-            if (!ParseFieldMove(header.m_type, std::move(csvData[i][h]), columnField))
-            {
-              OUTPUT_MESSAGE("Error: Table {} has bad data in column {}", tableName, header.m_name);
-              return 1;
-            }
-
-            if (header.m_type != ColumnType::String)
-            {
-              // Check min / max ranges
-              if (header.m_minValue.size() > 0)
-              {
-                if (columnField < minNumber)
-                {
-                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is less than min {}", tableName, header.m_name, to_string(columnField), header.m_minValue);
-                  return 1;
-                }
-              }
-              if (header.m_maxValue.size() > 0)
-              {
-                if (columnField > maxNumber)
-                {
-                  OUTPUT_MESSAGE("Error: Table {} has bad data in column {} entry \"{}\" is greater than max {} ", tableName, header.m_name, to_string(columnField), header.m_maxValue);
-                  return 1;
-                }
-              }
-            }
+            OUTPUT_MESSAGE("Error: Table has bad data in column {} entry \"{}\" is greater than max {} ", header.m_name, to_string(columnField), header.m_maxValue);
+            return false;
           }
         }
-
-        // Sort by the keys, check if duplicate rows
-        if (newTable.m_keyColumns.size() > 0 && newTable.m_rowData.size() > 1)
-        {
-          std::sort(newTable.m_rowData.begin(), newTable.m_rowData.end(),
-            [&newTable](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
-            {
-              for (uint32_t index : newTable.m_keyColumns)
-              {
-                if (a[index] < b[index])
-                {
-                  return true;
-                }
-                if (a[index] != b[index])
-                {
-                  break;
-                }
-              }
-              return false;
-            });
-
-          // Loop and check for duplicate rows
-          for (size_t r = 1; r < newTable.m_rowData.size(); r++)
-          {
-            const std::vector<FieldType>& prev = newTable.m_rowData[r - 1];
-            const std::vector<FieldType>& curr = newTable.m_rowData[r];
-
-            bool duplicate = true;
-            for (uint32_t index : newTable.m_keyColumns)
-            {
-              if (curr[index] != prev[index])
-              {
-                duplicate = false;
-                break;
-              }
-            }
-            if (duplicate)
-            {
-              std::string errorKeys;
-              for (uint32_t index : newTable.m_keyColumns)
-              {
-                errorKeys += to_string(curr[index]) + " ";
-              }
-              OUTPUT_MESSAGE("Error: Table {} has duplicate keys {}", tableName, errorKeys);
-              return 1;
-            }
-          }
-        }
-
-        // If checking table layout - format and compare against source
-
-        // Add to a hashmap of all the csv files
-        g_tables[tableName] = std::move(newTable);
-
       }
     }
   }
 
+  // Sort by the keys, check if duplicate rows
+  if (newTable.m_keyColumns.size() > 0 && newTable.m_rowData.size() > 1)
+  {
+    std::sort(newTable.m_rowData.begin(), newTable.m_rowData.end(),
+      [&newTable](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+      {
+        for (uint32_t index : newTable.m_keyColumns)
+        {
+          if (a[index] < b[index])
+          {
+            return true;
+          }
+          if (a[index] != b[index])
+          {
+            break;
+          }
+        }
+        return false;
+      });
+
+    // Loop and check for duplicate rows
+    for (size_t r = 1; r < newTable.m_rowData.size(); r++)
+    {
+      const std::vector<FieldType>& prev = newTable.m_rowData[r - 1];
+      const std::vector<FieldType>& curr = newTable.m_rowData[r];
+
+      bool duplicate = true;
+      for (uint32_t index : newTable.m_keyColumns)
+      {
+        if (curr[index] != prev[index])
+        {
+          duplicate = false;
+          break;
+        }
+      }
+      if (duplicate)
+      {
+        std::string errorKeys;
+        for (uint32_t index : newTable.m_keyColumns)
+        {
+          errorKeys += to_string(curr[index]) + " ";
+        }
+        OUTPUT_MESSAGE("Error: Table has duplicate keys {}", errorKeys);
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool ValidateTables()
+{
   // Check that the table references match up
   std::vector<bool> processed;
   std::vector<uint32_t> matchIndices;
@@ -695,14 +626,14 @@ int main(int argc, char* argv[])
       if (!g_tables.contains(header.m_foreignTable))
       {
         OUTPUT_MESSAGE("Error: Table {} has link to unknown table {}", tableName, header.m_foreignTable);
-        return 1;
+        return false;
       }
 
       const CSVTable& foreignTable = g_tables[header.m_foreignTable];
       if (foreignTable.m_keyColumns.size() == 0)
       {
         OUTPUT_MESSAGE("Error: Table {} has link to table {} with no keys", tableName, header.m_foreignTable);
-        return 1;
+        return false;
       }
 
       // Get the base name end position
@@ -736,7 +667,7 @@ int main(int argc, char* argv[])
           if (foundIndex < 0)
           {
             OUTPUT_MESSAGE("Error: Table {} has link to table {} with out key {}", tableName, header.m_foreignTable, searchName);
-            return 1;
+            return false;
           }
           matchIndices.push_back(foundIndex);
         }
@@ -748,7 +679,7 @@ int main(int argc, char* argv[])
         auto findInfo = std::lower_bound(foreignTable.m_rowData.begin(), foreignTable.m_rowData.end(), row,
           [&foreignTable, &matchIndices](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
           {
-            for(uint32_t i = 0; i< foreignTable.m_keyColumns.size(); i++)
+            for (uint32_t i = 0; i < foreignTable.m_keyColumns.size(); i++)
             {
               const FieldType& aVal = a[foreignTable.m_keyColumns[i]];
               const FieldType& bVal = b[matchIndices[i]];
@@ -779,7 +710,7 @@ int main(int argc, char* argv[])
           };
 
         if (findInfo == foreignTable.m_rowData.end() ||
-            !IsEqual(*findInfo, row))
+          !IsEqual(*findInfo, row))
         {
           std::string errorKeys;
           for (uint32_t index : matchIndices)
@@ -787,7 +718,7 @@ int main(int argc, char* argv[])
             errorKeys += to_string(row[index]) + " ";
           }
           OUTPUT_MESSAGE("Error: Table {} has link to table {} with a missing lookup column key {}", tableName, header.m_foreignTable, errorKeys);
-          return 1;
+          return false;
         }
       }
 
@@ -799,6 +730,92 @@ int main(int argc, char* argv[])
     }
   }
 
+  return true;
+}
+
+int main(int argc, char* argv[])
+{
+  // Check if directory path is provided
+  if (argc != 2)
+  {
+    OUTPUT_MESSAGE("Usage: CSVProcessor <directory_path>");
+    return 1;
+  }
+
+  // Get directory path from command line
+  const char* dirPath = argv[1];
+
+  // Check if directory exists
+  std::error_code error;
+  std::filesystem::file_status dirPathStatus = std::filesystem::status(dirPath, error);
+  if (!std::filesystem::exists(dirPath) ||
+      !std::filesystem::is_directory(dirPathStatus))
+  {
+    OUTPUT_MESSAGE("Error: {} is not a valid directory", dirPath);
+    return 1;
+  }
+
+  // Iterate through files in directory
+  std::vector<char> csvFileData;
+  for (const auto& entry : std::filesystem::directory_iterator(dirPath))
+  {
+    // Check if file has .csv extension
+    std::string extension = entry.path().extension().string();
+    if (entry.is_regular_file() &&
+        extension.size() == 4 &&
+        std::tolower(extension[0]) == '.' &&
+        std::tolower(extension[1]) == 'c' &&
+        std::tolower(extension[2]) == 's' &&
+        std::tolower(extension[3]) == 'v')
+    {
+      // Open the file in binary mode to avoid newline conversions
+      {
+        std::ifstream file(entry.path(), std::ios::binary);
+        if (!file.is_open())
+        {
+          OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
+          return 1;
+        }
+
+        // Seek to the end to determine file size
+        file.seekg(0, std::ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // Read into a buffer
+        csvFileData.resize(fileSize + 1);
+        csvFileData[fileSize] = 0; // Add null terminator
+
+        file.read(csvFileData.data(), fileSize);
+        if (!file)
+        {
+          OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
+          return 1;
+        }
+        file.close();
+      }
+      std::string tableName = entry.path().stem().string();
+
+      // Read in the table data from the file
+      CSVTable newTable;
+      if (!ReadTable(csvFileData.data(), newTable))
+      {
+        OUTPUT_MESSAGE("Error: Reading table {}", tableName);
+        return 1;
+      }
+
+      // Add to a hashmap of all the csv files
+      g_tables[tableName] = std::move(newTable);
+    }
+  }
+
+  // Validate tables
+  if (!ValidateTables())
+  {
+    return 1;
+  }
+
+  // If checking table layout - format and compare against source
 
   // Add code gen of runtime types
 
