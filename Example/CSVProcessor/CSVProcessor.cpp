@@ -644,7 +644,6 @@ int main(int argc, char* argv[])
               return false;
             });
 
-
           // Loop and check for duplicate rows
           for (size_t r = 1; r < newTable.m_rowData.size(); r++)
           {
@@ -685,24 +684,125 @@ int main(int argc, char* argv[])
   // Check that the table references match up
   for (const auto& [tableName, table] : g_tables)
   {
-    // Check the table for foreign links
+    std::vector<bool> processed;
+    processed.resize(table.m_headerData.size());
 
-      // Check if this column is already processed
+    // Check the table for foreign links
+    for (uint32_t h = 0; h < table.m_headerData.size(); h++)
+    {
+      // Check if this column is already processed or does not have a foreign table link
+      const CSVHeader& header = table.m_headerData[h];
+      if (processed[h] || header.m_foreignTable.size() == 0)
+      {
+        continue;
+      }
 
       // Check foreign table exists
+      if (!g_tables.contains(header.m_foreignTable))
+      {
+        OUTPUT_MESSAGE("Error: Table {} has link to unknown table {}", tableName, header.m_foreignTable);
+        return 1;
+      }
 
-      // Check how many keys in the foreign table
+      const CSVTable& foreignTable = g_tables[header.m_foreignTable];
+      if (foreignTable.m_keyColumns.size() == 0)
+      {
+        OUTPUT_MESSAGE("Error: Table {} has link to table {} with no keys", tableName, header.m_foreignTable);
+        return 1;
+      }
 
-      // Check if column name specified
+      // Get the base name
+      std::string_view baseName = std::string_view(header.m_name).substr(0, header.m_name.find_first_of(':'));
 
-          // Find column in the target table
+      // If only one foreign key, check for optional foreign table column name
+      std::vector<uint32_t> matchIndices;
+      if (foreignTable.m_keyColumns.size() == 1 && baseName == header.m_name)
+      {
+        // If only the base name, 
+        matchIndices.push_back(h);
+      }
+      else
+      {
+        // Find each base name+ foreign key name
+        for (uint32_t foreignKeyColumn : foreignTable.m_keyColumns)
+        {
+          std::string searchName;
+          searchName.assign(baseName);
+          searchName += ":" + foreignTable.m_headerData[foreignKeyColumn].m_name;
 
-      // Else find column name (check if only one key)
+          int32_t foundIndex = -1;
+          for (uint32_t i = 0; i < table.m_headerData.size(); i++)
+          {
+            if (table.m_headerData[i].m_name == searchName)
+            {
+              foundIndex = i;
+              break;
+            }
+          }
+          if (foundIndex < 0)
+          {
+            OUTPUT_MESSAGE("Error: Table {} has link to table {} with out key {}", tableName, header.m_foreignTable, searchName);
+            return 1;
+          }
+          matchIndices.push_back(foundIndex);
+        }
+      }
 
-      // std::lower_bound
-      
+      // Search in the foreign table for each of the keys in the main table
+      for (const std::vector<FieldType>& row : table.m_rowData)
+      {
+        auto findInfo = std::lower_bound(foreignTable.m_rowData.begin(), foreignTable.m_rowData.end(), row,
+          [&foreignTable, &matchIndices](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+          {
+            for(uint32_t i = 0; i< foreignTable.m_keyColumns.size(); i++)
+            {
+              const FieldType& aVal = a[foreignTable.m_keyColumns[i]];
+              const FieldType& bVal = b[matchIndices[i]];
+              if (aVal < bVal)
+              {
+                return true;
+              }
+              if (aVal != bVal)
+              {
+                break;
+              }
+            }
+            return false;
+          });
 
-    // Check foreign keys that are numbers, do the number check again
+        auto IsEqual = [&foreignTable, &matchIndices](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+          {
+            for (uint32_t i = 0; i < foreignTable.m_keyColumns.size(); i++)
+            {
+              const FieldType& aVal = a[foreignTable.m_keyColumns[i]];
+              const FieldType& bVal = b[matchIndices[i]];
+              if (aVal != bVal)
+              {
+                return false;
+              }
+            }
+            return true;
+          };
+
+        if (findInfo == foreignTable.m_rowData.end() ||
+            !IsEqual(*findInfo, row))
+        {
+          std::string errorKeys;
+          for (uint32_t index : matchIndices)
+          {
+            errorKeys += to_string(row[index]) + " ";
+          }
+          OUTPUT_MESSAGE("Error: Table {} has link to table {} with a missing lookup column key {}", tableName, header.m_foreignTable, errorKeys);
+          return 1;
+        }
+      }
+
+      // Flag all columns as processed
+      for (uint32_t index : matchIndices)
+      {
+        processed[index] = true;
+      }
+    }
   }
 
 
