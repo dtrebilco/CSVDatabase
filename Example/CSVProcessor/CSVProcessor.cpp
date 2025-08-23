@@ -10,7 +10,7 @@
 #include <variant>
 #include <algorithm>
 
-#define OUTPUT_MESSAGE(...) { char buf[256]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
+#define OUTPUT_MESSAGE(...) { char buf[512]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
 
 enum class ColumnType
 {
@@ -658,7 +658,8 @@ bool ValidateTables()
           int32_t foundIndex = -1;
           for (uint32_t i = 0; i < table.m_headerData.size(); i++)
           {
-            if (table.m_headerData[i].m_name == searchName)
+            if (table.m_headerData[i].m_name == searchName &&
+                table.m_headerData[i].m_foreignTable == header.m_foreignTable)
             {
               foundIndex = i;
               break;
