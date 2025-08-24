@@ -232,9 +232,6 @@ struct CSVTable
   std::vector<std::vector<FieldType>> m_rowData;
 };
 
-std::unordered_map<std::string, CSVTable> g_tables;
-
-
 std::vector<std::vector<std::string>> readCSV(const char* srcData) 
 {
   std::vector<std::vector<std::string>> csvTable;
@@ -600,13 +597,13 @@ bool ReadTable(const char* fileString, CSVTable& newTable)
   return true;
 }
 
-bool ValidateTables()
+bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
 {
   // Check that the table references match up
   std::vector<bool> processed;
   std::vector<uint32_t> matchIndices;
   std::string searchName;
-  for (const auto& [tableName, table] : g_tables)
+  for (const auto& [tableName, table] : tables)
   {
     // Reset the processed array
     processed.resize(0);
@@ -623,13 +620,14 @@ bool ValidateTables()
       }
 
       // Check foreign table exists
-      if (!g_tables.contains(header.m_foreignTable))
+      auto findTable = tables.find(header.m_foreignTable);
+      if (findTable == tables.end())
       {
         OUTPUT_MESSAGE("Error: Table {} has link to unknown table {}", tableName, header.m_foreignTable);
         return false;
       }
 
-      const CSVTable& foreignTable = g_tables[header.m_foreignTable];
+      const CSVTable& foreignTable = findTable->second;
       if (foreignTable.m_keyColumns.size() == 0)
       {
         OUTPUT_MESSAGE("Error: Table {} has link to table {} with no keys", tableName, header.m_foreignTable);
@@ -757,6 +755,7 @@ int main(int argc, char* argv[])
   }
 
   // Iterate through files in directory
+  std::unordered_map<std::string, CSVTable> tables;
   std::vector<char> csvFileData;
   for (const auto& entry : std::filesystem::directory_iterator(dirPath))
   {
@@ -795,7 +794,13 @@ int main(int argc, char* argv[])
         }
         file.close();
       }
+
       std::string tableName = entry.path().stem().string();
+      if (tables.contains(tableName))
+      {
+        OUTPUT_MESSAGE("Error: Duplicate table name {}", tableName);
+        return 1;
+      }
 
       // Read in the table data from the file
       CSVTable newTable;
@@ -805,13 +810,13 @@ int main(int argc, char* argv[])
         return 1;
       }
 
-      // Add to a hashmap of all the csv files
-      g_tables[tableName] = std::move(newTable);
+      // Add to a map of all the csv files
+      tables[tableName] = std::move(newTable);
     }
   }
 
   // Validate tables
-  if (!ValidateTables())
+  if (!ValidateTables(tables))
   {
     return 1;
   }
