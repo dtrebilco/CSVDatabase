@@ -72,6 +72,14 @@ std::string to_string(const FieldType& var)
   }, var);
 }
 
+template <typename T>
+T ReadNumberValue(const char* start, const char* end, std::from_chars_result& strRes)
+{
+  T val = 0;
+  strRes = std::from_chars(start, end, val);
+  return val;
+}
+
 bool ParseField(ColumnType type, std::string_view string, FieldType& retField)
 {
   if (type == ColumnType::String)
@@ -81,15 +89,14 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retField)
   }
 
   std::from_chars_result strRes;
-
   const char* start = string.data();
   const char* end = start + string.size();
+
   switch (type)
   {
   case(ColumnType::Bool):
   {
-    int8_t val = 0;
-    strRes = std::from_chars(start, end, val);
+    int8_t val = ReadNumberValue<int8_t>(start, end, strRes);
     if (val == 0)
     {
       retField = false;
@@ -106,79 +113,17 @@ bool ParseField(ColumnType type, std::string_view string, FieldType& retField)
     break;
   }
 
-  case(ColumnType::Int8):
-  {
-    int8_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
-  case(ColumnType::UInt8):
-  {
-    uint8_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
-  case(ColumnType::Int16):
-  {
-    int16_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
-  case(ColumnType::UInt16):
-  {
-    uint16_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
+  case(ColumnType::Int8):    retField = ReadNumberValue<int8_t>  (start, end, strRes); break;
+  case(ColumnType::UInt8):   retField = ReadNumberValue<uint8_t> (start, end, strRes); break;
+  case(ColumnType::Int16):   retField = ReadNumberValue<int16_t> (start, end, strRes); break;
+  case(ColumnType::UInt16):  retField = ReadNumberValue<uint16_t>(start, end, strRes); break;
+  case(ColumnType::Int32):   retField = ReadNumberValue<int32_t> (start, end, strRes); break;
+  case(ColumnType::UInt32):  retField = ReadNumberValue<uint32_t>(start, end, strRes); break;
+  case(ColumnType::Int64):   retField = ReadNumberValue<int64_t> (start, end, strRes); break;
+  case(ColumnType::UInt64):  retField = ReadNumberValue<uint64_t>(start, end, strRes); break;
+  case(ColumnType::Float32): retField = ReadNumberValue<float>   (start, end, strRes); break;
+  case(ColumnType::Float64): retField = ReadNumberValue<double>  (start, end, strRes); break;
 
-  case(ColumnType::Int32): 
-  { 
-    int32_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break; 
-  }
-  case(ColumnType::UInt32):
-  {  
-    uint32_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
-
-  case(ColumnType::Int64): 
-  { 
-    int64_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break; 
-  }
-  case(ColumnType::UInt64):
-  { 
-    uint64_t val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
-
-  case(ColumnType::Float32):
-  { 
-    float val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
-  case(ColumnType::Float64): 
-  { 
-    double val = 0;
-    strRes = std::from_chars(start, end, val);
-    retField = val;
-    break;
-  }
   default:
     OUTPUT_MESSAGE("Error: String type {} is unknown for \"{}\"", (int)type, string);
     return false;
