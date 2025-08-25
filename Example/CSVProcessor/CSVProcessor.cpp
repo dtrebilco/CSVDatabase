@@ -13,10 +13,33 @@
 // TODO: Add test where the key is a foreign key - part of a multi key also
 // Test min max range of each type parsing - with/without min max
 // TODO: Remove ColumnType and just have a default? Also remove min/max?
+// TODO: Have columns of the same type - and parse inline to the final format
 
 #define OUTPUT_MESSAGE(...) { char buf[512]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
 
 using FieldType = std::variant<std::string, bool, int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t, uint64_t, float, double>;
+
+struct CSVHeader
+{
+  std::string m_name;        // Column name
+  FieldType m_type;          // Column type
+  bool m_isKey = false;      // Is table key
+  bool m_isIgnored = false;  // Is ignored
+
+  std::string m_minValue;    // The min range string value (if any)
+  std::string m_maxValue;    // The max range string value (if any)
+
+  std::string m_comment;     // Comment field (if any)
+  std::string m_foreignTable;// Foreign table link (if any)
+};
+
+struct CSVTable
+{
+  std::vector<CSVHeader> m_headerData; // Header data that is info for each column
+  std::vector<uint32_t> m_keyColumns;  // Index of the columns that are keys in the table
+
+  std::vector<std::vector<FieldType>> m_rowData;
+};
 
 bool GetColumnType(std::string_view name, FieldType& retType)
 {
@@ -130,29 +153,7 @@ bool ParseFieldMove(const FieldType& type, std::string&& string, FieldType& retF
   return ParseField(type, string, retField);
 }
 
-struct CSVHeader
-{
-  std::string m_name;        // Column name
-  FieldType m_type;          // Column type
-  bool m_isKey = false;      // Is table key
-  bool m_isIgnored = false;  // Is ignored
-
-  std::string m_minValue;    // The min range string value (if any)
-  std::string m_maxValue;    // The max range string value (if any)
-
-  std::string m_comment;     // Comment field (if any)
-  std::string m_foreignTable;// Foreign table link (if any)
-};
-
-struct CSVTable
-{
-  std::vector<CSVHeader> m_headerData; // Header data that is info for each column
-  std::vector<uint32_t> m_keyColumns;  // Index of the columns that are keys in the table
-
-  std::vector<std::vector<FieldType>> m_rowData;
-};
-
-std::vector<std::vector<std::string>> readCSV(const char* srcData) 
+std::vector<std::vector<std::string>> ReadCSV(const char* srcData) 
 {
   std::vector<std::vector<std::string>> csvTable;
   std::vector<std::string> row;
@@ -236,11 +237,10 @@ std::vector<std::vector<std::string>> readCSV(const char* srcData)
   }
 
   // How to handle if still in quotes at end? inQuotes
-
   return csvTable;
 }
 
-bool ReadHeader(const std::string& field, CSVHeader& out)
+bool ReadHeader(std::string_view field, CSVHeader& out)
 {
   out = CSVHeader{};
 
@@ -341,7 +341,7 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
 bool ReadTable(const char* fileString, CSVTable& newTable)
 {
   // Check that there is at least one row in addition to the header
-  std::vector<std::vector<std::string>> csvData = readCSV(fileString);
+  std::vector<std::vector<std::string>> csvData = ReadCSV(fileString);
   if (csvData.size() < 2)
   {
     OUTPUT_MESSAGE("Error: Table does not have at least 2 rows");
