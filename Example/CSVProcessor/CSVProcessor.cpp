@@ -10,52 +10,34 @@
 #include <variant>
 #include <algorithm>
 
+// TODO: Add test where the key is a foreign key - part of a multi key also
+// Test min max range of each type parsing - with/without min max
+// TODO: Remove ColumnType and just have a default? Also remove min/max?
+
 #define OUTPUT_MESSAGE(...) { char buf[512]; const auto out = std::format_to_n(buf, std::size(buf) - 1, __VA_ARGS__); *out.out = '\0'; printf("%s\n", buf); }
 
-enum class ColumnType
-{
-  Unknown = 0,
-
-  String,
-  Bool,
-  Int8,
-  UInt8,
-  Int16,
-  UInt16,
-  Int32,
-  UInt32,
-  Int64,
-  UInt64,
-  Float32,
-  Float64,
-
-  ColumnType_Count
-};
-
-ColumnType GetColumnType(std::string_view name)
-{
-  if (name == "string") { return ColumnType::String; }
-  if (name == "bool") { return ColumnType::Bool; }
-
-  if (name == "int8") { return ColumnType::Int8; }
-  if (name == "int16") { return ColumnType::Int16; }
-  if (name == "int23") { return ColumnType::Int32; }
-  if (name == "int64") { return ColumnType::Int64; }
-
-  if (name == "uint8") { return ColumnType::UInt8; }
-  if (name == "uint16") { return ColumnType::UInt16; }
-  if (name == "uint23") { return ColumnType::UInt32; }
-  if (name == "uint64") { return ColumnType::UInt64; }
-
-  if (name == "float32") { return ColumnType::Float32; }
-  if (name == "float64") { return ColumnType::Float64; }
-
-  static_assert((int)ColumnType::ColumnType_Count == 13, "Update lookup");
-
-  return ColumnType::Unknown;
-}
-
 using FieldType = std::variant<std::string, bool, int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t, uint64_t, float, double>;
+
+bool GetColumnType(std::string_view name, FieldType& retType)
+{
+  if (name == "string") { retType = FieldType(""); return true;   }
+  if (name == "bool")  { retType = FieldType(false); return true; }
+
+  if (name == "int8")  { retType = FieldType(int8_t(0));  return true; }
+  if (name == "int16") { retType = FieldType(int16_t(0)); return true; }
+  if (name == "int23") { retType = FieldType(int32_t(0)); return true; }
+  if (name == "int64") { retType = FieldType(int64_t(0)); return true; }
+
+  if (name == "uint8") { retType = FieldType(uint8_t(0));   return true; }
+  if (name == "uint16") { retType = FieldType(uint16_t(0)); return true; }
+  if (name == "uint23") { retType = FieldType(uint32_t(0)); return true; }
+  if (name == "uint64") { retType = FieldType(uint64_t(0)); return true; }
+
+  if (name == "float32") { retType = FieldType(float(0)); return true;  }
+  if (name == "float64") { retType = FieldType(double(0)); return true; }
+
+  return false;
+}
 
 std::string to_string(const FieldType& var)
 {
@@ -80,73 +62,66 @@ T ReadNumberValue(const char* start, const char* end, std::from_chars_result& st
   return val;
 }
 
-bool ParseField(ColumnType type, std::string_view string, FieldType& retField)
+bool ParseField(const FieldType& type, std::string_view string, FieldType& retField)
 {
-  if (type == ColumnType::String)
+  if (std::holds_alternative<std::string>(retField))
   {
     retField = std::string(string);
     return true;
   }
 
-  std::from_chars_result strRes;
+  std::from_chars_result strRes = {};
   const char* start = string.data();
   const char* end = start + string.size();
 
-  switch (type)
+  std::visit([start, end, &strRes, &retField]<typename T>(const T & e)
   {
-  case(ColumnType::Bool):
+    if constexpr (std::is_same_v<T, std::string>)
+    {
+      // String is handled earlier
+    }
+    else if constexpr (std::is_same_v<T, bool>)
+    {
+      int8_t val = ReadNumberValue<int8_t>(start, end, strRes);
+      if (val == 0)
+      {
+        retField = false;
+      }
+      else if (val == 1)
+      {
+        retField = true;
+      }
+      else
+      {
+        strRes.ptr = start;
+        strRes.ec = std::errc::result_out_of_range;
+        OUTPUT_MESSAGE("Error: String type bool has error converting data \"{}\"", std::string_view(start, end));
+      }
+    }
+    else // float/int
+    {
+      retField = ReadNumberValue<T>(start, end, strRes);
+    }
+  }, type);
+
+  if (strRes.ec != std::errc())
   {
-    int8_t val = ReadNumberValue<int8_t>(start, end, strRes);
-    if (val == 0)
-    {
-      retField = false;
-    }
-    else if (val == 1)
-    {
-      retField = true;
-    }
-    else
-    {
-      OUTPUT_MESSAGE("Error: String type bool has error converting data \"{}\"", string);
-      return false;
-    }
-    break;
-  }
-
-  case(ColumnType::Int8):    retField = ReadNumberValue<int8_t>  (start, end, strRes); break;
-  case(ColumnType::UInt8):   retField = ReadNumberValue<uint8_t> (start, end, strRes); break;
-  case(ColumnType::Int16):   retField = ReadNumberValue<int16_t> (start, end, strRes); break;
-  case(ColumnType::UInt16):  retField = ReadNumberValue<uint16_t>(start, end, strRes); break;
-  case(ColumnType::Int32):   retField = ReadNumberValue<int32_t> (start, end, strRes); break;
-  case(ColumnType::UInt32):  retField = ReadNumberValue<uint32_t>(start, end, strRes); break;
-  case(ColumnType::Int64):   retField = ReadNumberValue<int64_t> (start, end, strRes); break;
-  case(ColumnType::UInt64):  retField = ReadNumberValue<uint64_t>(start, end, strRes); break;
-  case(ColumnType::Float32): retField = ReadNumberValue<float>   (start, end, strRes); break;
-  case(ColumnType::Float64): retField = ReadNumberValue<double>  (start, end, strRes); break;
-
-  default:
-    OUTPUT_MESSAGE("Error: String type {} is unknown for \"{}\"", (int)type, string);
+    OUTPUT_MESSAGE("Error: String type {} has error converting data \"{}\"", type.index(), string);
     return false;
   }
 
   if (strRes.ptr != end)
   {
-    OUTPUT_MESSAGE("Error: String type {} has excess data \"{}\"", (int)type, string);
-    return false;
-  }
-
-  if (strRes.ec != std::errc())
-  {
-    OUTPUT_MESSAGE("Error: String type {} has error converting data \"{}\"", (int)type, string);
+    OUTPUT_MESSAGE("Error: String type {} has excess data \"{}\"", type.index(), string);
     return false;
   }
 
   return true;
 }
 
-bool ParseFieldMove(ColumnType type, std::string&& string, FieldType& retField)
+bool ParseFieldMove(const FieldType& type, std::string&& string, FieldType& retField)
 {
-  if (type == ColumnType::String)
+  if (std::holds_alternative<std::string>(type))
   {
     retField = std::move(string);
     return true;
@@ -158,7 +133,7 @@ bool ParseFieldMove(ColumnType type, std::string&& string, FieldType& retField)
 struct CSVHeader
 {
   std::string m_name;        // Column name
-  ColumnType m_type = ColumnType::Unknown;// Column type
+  FieldType m_type;          // Column type
   bool m_isKey = false;      // Is table key
   bool m_isIgnored = false;  // Is ignored
 
@@ -269,6 +244,7 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
 {
   out = CSVHeader{};
 
+  bool hasType = false;
   std::string_view tags = field;
 
   // Strip off any comment
@@ -321,15 +297,14 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
       }
       else
       {
-        ColumnType newType = GetColumnType(tag);
-        if (newType != ColumnType::Unknown)
+        if (GetColumnType(tag, out.m_type))
         {
-          if (out.m_type != ColumnType::Unknown)
+          if (hasType)
           {
             OUTPUT_MESSAGE("Duplicate types in field {}", field);
             return false;
           }
-          out.m_type = newType;
+          hasType = true;
         }
         else
         {
@@ -342,17 +317,11 @@ bool ReadHeader(const std::string& field, CSVHeader& out)
 
   } while (tags.size() > 0);
 
-  // If there is no type assigned, assign string
-  if (out.m_type == ColumnType::Unknown)
-  {
-    out.m_type = ColumnType::String;
-  }
-
   // If ignored, reset values
   if (out.m_isIgnored)
   {
     out.m_isKey = false;
-    out.m_type = ColumnType::String;
+    out.m_type = FieldType("");
     out.m_foreignTable.clear();
     out.m_comment.clear();
     out.m_minValue.clear();
@@ -468,7 +437,7 @@ bool ReadTable(const char* fileString, CSVTable& newTable)
         return false;
       }
 
-      if (header.m_type != ColumnType::String)
+      if (!std::holds_alternative<std::string>(header.m_type))
       {
         // Check min / max ranges
         if (header.m_minValue.size() > 0)
@@ -777,6 +746,3 @@ int main(int argc, char* argv[])
 
   return 0;
 }
-
-
-// TODO: Add test where the key is a foreign key - part of a multi key also
