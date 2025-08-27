@@ -64,19 +64,46 @@ bool GetColumnType(std::string_view name, FieldType& retType)
   return false;
 }
 
-std::string to_string(const FieldType& var)
+void AppendToString(const FieldType& var, std::string& appendStr)
 {
-  return std::visit([]<typename T>(const T & e)
+  return std::visit([&appendStr]<typename T>(const T & e)
   {
     if constexpr (std::is_same_v<T, std::string>)
     {
-      return e;
+      appendStr += e;
+    }
+    else if constexpr (std::is_same_v<T, bool>)
+    {
+      if (e)
+      {
+        appendStr += "1";
+      }
+      else
+      {
+        appendStr += "0";
+      }
     }
     else // float/int
-    { 
-      return std::to_string(e);
+    {
+      char buf[100];
+      std::to_chars_result result = std::to_chars(buf, buf + std::size(buf), e);
+      if (result.ec == std::errc())
+      {
+        appendStr += std::string_view(buf, result.ptr - buf);
+      }
+      else
+      {
+        appendStr += std::to_string(e); // This should never get called
+      }
     }
   }, var);
+}
+
+std::string to_string(const FieldType& var)
+{
+  std::string ret;
+  AppendToString(var, ret);
+  return ret;
 }
 
 template <typename T>
@@ -89,7 +116,7 @@ T ReadNumberValue(const char* start, const char* end, std::from_chars_result& st
 
 bool ParseField(const FieldType& type, std::string_view string, FieldType& retField)
 {
-  if (std::holds_alternative<std::string>(retField))
+  if (std::holds_alternative<std::string>(type))
   {
     retField = std::string(string);
     return true;
@@ -503,7 +530,8 @@ bool ReadTable(const char* fileString, CSVTable& newTable)
         std::string errorKeys;
         for (uint32_t index : newTable.m_keyColumns)
         {
-          errorKeys += to_string(curr[index]) + " ";
+          AppendToString(curr[index], errorKeys);
+          errorKeys += " ";
         }
         OUTPUT_MESSAGE("Error: Table has duplicate keys {}", errorKeys);
         return false;
@@ -626,12 +654,13 @@ bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
           };
 
         if (findInfo == foreignTable.m_rowData.end() ||
-          !IsEqual(*findInfo, row))
+            !IsEqual(*findInfo, row))
         {
           std::string errorKeys;
           for (uint32_t index : matchIndices)
           {
-            errorKeys += to_string(row[index]) + " ";
+            AppendToString(row[index], errorKeys);
+            errorKeys += " ";
           }
           OUTPUT_MESSAGE("Error: Table {} has link to table {} with a missing lookup column key {}", tableName, header.m_foreignTable, errorKeys);
           return false;
@@ -729,6 +758,7 @@ int main(int argc, char* argv[])
 
       //DT_TODO: Check if enum or global table and do not do this
       {
+        std::string fieldStr;
         std::string outFile;
         outFile.reserve(csvFileData.size());
 
@@ -760,28 +790,37 @@ int main(int argc, char* argv[])
             }
             firstWrite = false;
 
-            std::string fieldStr = to_string(field); // DT_TODO: Optimize this to_string - only need to check for quotes on string type
-
-            // If the fields contain a comma or quotes, put in quotes
-            size_t quoteOffset = fieldStr.find_first_of('"');
-            if (quoteOffset != std::string::npos || 
-                fieldStr.find_first_of(',') != std::string::npos)
+            // Get the field in string form
+            if (const std::string* accessField = std::get_if<std::string>(&field))
             {
-              outFile += "\"";
-
-              // Replace all single quotes with double quotes // DT_TODO: Test this!
-              while (quoteOffset != std::string::npos)
+              // If the fields contain a comma or quotes, put in quotes
+              size_t quoteOffset = accessField->find_first_of('"');
+              if (quoteOffset != std::string::npos ||
+                  accessField->find_first_of(',') != std::string::npos)
               {
-                fieldStr.replace(quoteOffset, 1, 2, '"');
-                quoteOffset = fieldStr.find_first_of('"', quoteOffset + 2);
-              }
+                fieldStr = *accessField;
+                outFile += "\"";
 
-              outFile += fieldStr;
-              outFile += "\"";
+                // Replace all single quotes with double quotes // DT_TODO: Test this!
+                while (quoteOffset != std::string::npos)
+                {
+                  fieldStr.replace(quoteOffset, 1, 2, '"');
+                  quoteOffset = fieldStr.find_first_of('"', quoteOffset + 2);
+                }
+
+                outFile += fieldStr;
+                outFile += "\"";
+              }
+              else
+              {
+                // Add raw unmodified string
+                outFile += *accessField;
+              }
             }
             else
             {
-              outFile += fieldStr;
+              // Add number type
+              AppendToString(field, outFile);
             }
           }
           outFile += "\n";
