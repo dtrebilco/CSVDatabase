@@ -758,9 +758,27 @@ int main(int argc, char* argv[])
 
       //DT_TODO: Check if enum or global table and do not do this
       {
+        std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
+
         std::string fieldStr;
         std::string outFile;
         outFile.reserve(csvFileData.size());
+
+        // Find the first type of newline in the file
+        std::string newLine = "\n";
+        size_t newLineoffset = existingFile.find_first_of("\n\r", 0, 2);
+        if (newLineoffset != std::string::npos)
+        {
+          newLine = existingFile[newLineoffset];
+
+          // Check for windows style \r\n
+          if (existingFile[newLineoffset] == '\r' && 
+              (newLineoffset + 1) < existingFile.size() &&
+              existingFile[newLineoffset + 1] == '\n')
+          {
+            newLine += '\n';
+          }
+        }
 
         // Write header data
         {
@@ -775,7 +793,7 @@ int main(int argc, char* argv[])
             outFile += header.m_fullField;
           }
         }
-        outFile += "\n"; //DT_TODO: get the newline char from the source file data?
+        outFile += newLine;
 
         // Write each row
         for (const std::vector<FieldType>& row : newTable.m_rowData)
@@ -823,11 +841,17 @@ int main(int argc, char* argv[])
               AppendToString(field, outFile);
             }
           }
-          outFile += "\n";
+          outFile += newLine;
         }
 
-        // DT_TODO: Check if the final char is a newline in original file, 
-        if (std::string_view(csvFileData.data(), csvFileData.size() - 1) != outFile)
+        // Remove the newline if the existing file does not have it
+        if (!existingFile.ends_with(newLine))
+        {
+          outFile.erase(outFile.size() - newLine.size());
+        }
+
+        // Check if the file data has changed and re-save it if it has
+        if (existingFile != outFile)
         {
           std::ofstream file(entry.path(), std::ios::binary);
           if (!file.is_open())
