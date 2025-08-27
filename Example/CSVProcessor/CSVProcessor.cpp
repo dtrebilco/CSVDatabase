@@ -21,6 +21,8 @@ using FieldType = std::variant<std::string, bool, int8_t, uint8_t, int16_t, uint
 
 struct CSVHeader
 {
+  std::string m_fullField;   // The raw full field string
+
   std::string m_name;        // Column name
   FieldType m_type;          // Column type
   bool m_isKey = false;      // Is table key
@@ -243,6 +245,7 @@ std::vector<std::vector<std::string>> ReadCSV(const char* srcData)
 bool ReadHeader(std::string_view field, CSVHeader& out)
 {
   out = CSVHeader{};
+  out.m_fullField = field;
 
   bool hasType = false;
   std::string_view tags = field;
@@ -700,8 +703,7 @@ int main(int argc, char* argv[])
         csvFileData.resize(fileSize + 1);
         csvFileData[fileSize] = 0; // Add null terminator
 
-        file.read(csvFileData.data(), fileSize);
-        if (!file)
+        if (!file.read(csvFileData.data(), fileSize))
         {
           OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
           return 1;
@@ -722,6 +724,87 @@ int main(int argc, char* argv[])
       {
         OUTPUT_MESSAGE("Error: Reading table {}", tableName);
         return 1;
+      }
+
+
+      //DT_TODO: Check if enum or global table and do not do this
+      {
+        std::string outFile;
+        outFile.reserve(csvFileData.size());
+
+        // Write header data
+        {
+          bool firstWrite = true;
+          for (const CSVHeader& header : newTable.m_headerData)
+          {
+            if (!firstWrite)
+            {
+              outFile += ",";
+            }
+            firstWrite = false;
+            outFile += header.m_fullField;
+          }
+        }
+        outFile += "\n"; //DT_TODO: get the newline char from the source file data?
+
+        // Write each row
+        for (const std::vector<FieldType>& row : newTable.m_rowData)
+        {
+          // Loop and write the fields
+          bool firstWrite = true;
+          for (const FieldType& field : row)
+          {
+            if (!firstWrite)
+            {
+              outFile += ",";
+            }
+            firstWrite = false;
+
+            std::string fieldStr = to_string(field); // DT_TODO: Optimize this to_string - only need to check for quotes on string type
+
+            // If the fields contain a comma or quotes, put in quotes
+            size_t quoteOffset = fieldStr.find_first_of('"');
+            if (quoteOffset != std::string::npos || 
+                fieldStr.find_first_of(',') != std::string::npos)
+            {
+              outFile += "\"";
+
+              // Replace all single quotes with double quotes // DT_TODO: Test this!
+              while (quoteOffset != std::string::npos)
+              {
+                fieldStr.replace(quoteOffset, 1, 2, '"');
+                quoteOffset = fieldStr.find_first_of('"', quoteOffset + 2);
+              }
+
+              outFile += fieldStr;
+              outFile += "\"";
+            }
+            else
+            {
+              outFile += fieldStr;
+            }
+          }
+          outFile += "\n";
+        }
+
+        // DT_TODO: Check if the final char is a newline in original file, 
+        if (std::string_view(csvFileData.data(), csvFileData.size() - 1) != outFile)
+        {
+          std::ofstream file(entry.path(), std::ios::binary);
+          if (!file.is_open())
+          {
+            OUTPUT_MESSAGE("Error: Unable to open file for writing {}", entry.path().string().c_str());
+            return 1;
+          }
+
+          if (!file.write(outFile.data(), outFile.size()))
+          {
+            OUTPUT_MESSAGE("Error: Unable to write file contents {}", entry.path().string().c_str());
+            return 1;
+          }
+          file.close();
+        }
+
       }
 
       // Add to a map of all the csv files
