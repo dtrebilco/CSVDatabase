@@ -43,6 +43,9 @@ struct CSVTable
   std::vector<std::vector<FieldType>> m_rowData;
 };
 
+bool IsGlobalTable(std::string_view tableName) { return tableName.starts_with("Global"); }
+bool IsEnumTable(std::string_view tableName) { return tableName.starts_with("Enum"); }
+
 bool GetColumnType(std::string_view name, FieldType& retType)
 {
   if (name == "string") { retType = FieldType(""); return true;   }
@@ -678,6 +681,98 @@ bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
   return true;
 }
 
+void SaveToString(const CSVTable& table, std::string_view existingFile, std::string& outFile)
+{
+  std::string fieldStr;
+  outFile.reserve(existingFile.size());
+
+  // Find the first type of newline in the file
+  std::string newLine = "\n";
+  size_t newLineoffset = existingFile.find_first_of("\n\r", 0, 2);
+  if (newLineoffset != std::string::npos)
+  {
+    newLine = existingFile[newLineoffset];
+
+    // Check for windows style \r\n
+    if (existingFile[newLineoffset] == '\r' &&
+      (newLineoffset + 1) < existingFile.size() &&
+      existingFile[newLineoffset + 1] == '\n')
+    {
+      newLine += '\n';
+    }
+  }
+
+  // Write header data
+  {
+    bool firstWrite = true;
+    for (const CSVHeader& header : table.m_headerData)
+    {
+      if (!firstWrite)
+      {
+        outFile += ",";
+      }
+      firstWrite = false;
+      outFile += header.m_fullField;
+    }
+  }
+  outFile += newLine;
+
+  // Write each row
+  for (const std::vector<FieldType>& row : table.m_rowData)
+  {
+    // Loop and write the fields
+    bool firstWrite = true;
+    for (const FieldType& field : row)
+    {
+      if (!firstWrite)
+      {
+        outFile += ",";
+      }
+      firstWrite = false;
+
+      // Get the field in string form
+      if (const std::string* accessField = std::get_if<std::string>(&field))
+      {
+        // If the fields contain a comma or quotes, put in quotes
+        size_t quoteOffset = accessField->find_first_of('"');
+        if (quoteOffset != std::string::npos ||
+            accessField->find_first_of(',') != std::string::npos)
+        {
+          fieldStr = *accessField;
+          outFile += "\"";
+
+          // Replace all single quotes with double quotes // DT_TODO: Test this!
+          while (quoteOffset != std::string::npos)
+          {
+            fieldStr.replace(quoteOffset, 1, 2, '"');
+            quoteOffset = fieldStr.find_first_of('"', quoteOffset + 2);
+          }
+
+          outFile += fieldStr;
+          outFile += "\"";
+        }
+        else
+        {
+          // Add raw unmodified string
+          outFile += *accessField;
+        }
+      }
+      else
+      {
+        // Add number type
+        AppendToString(field, outFile);
+      }
+    }
+    outFile += newLine;
+  }
+
+  // Remove the newline if the existing file does not have it
+  if (!existingFile.ends_with(newLine))
+  {
+    outFile.erase(outFile.size() - newLine.size());
+  }
+}
+
 int main(int argc, char* argv[])
 {
   // Check if directory path is provided
@@ -755,100 +850,34 @@ int main(int argc, char* argv[])
         return 1;
       }
 
+      // Check that Global and Enum tables have the correct format
+      if (IsGlobalTable(tableName) && newTable.m_rowData.size() != 1)
+      {
+        OUTPUT_MESSAGE("Error: Global table {} can only have one row - has {}", tableName, newTable.m_rowData.size());
+        return 1;
+      }
+      if (IsEnumTable(tableName))
+      {
+        if (newTable.m_headerData.size() != 3 ||
+           !newTable.m_headerData[0].m_isKey  ||
+            newTable.m_headerData[1].m_isKey  ||
+            newTable.m_headerData[2].m_isKey  ||
+            newTable.m_headerData[0].m_foreignTable.size() != 0 ||
+            newTable.m_headerData[1].m_foreignTable.size() != 0 || 
+            newTable.m_headerData[2].m_foreignTable.size() != 0)
+        {
+          OUTPUT_MESSAGE("Error: Enum table {} need three columns, single key and no foreign table links", tableName);
+          return 1;
+        }
+      }
 
-      //DT_TODO: Check if enum or global table and do not do this
+      // Check if enum table and do not resave - as enums could get re-ordered //DT_TODO: add command line
+      if (!IsEnumTable(tableName))
       {
         std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
 
-        std::string fieldStr;
         std::string outFile;
-        outFile.reserve(csvFileData.size());
-
-        // Find the first type of newline in the file
-        std::string newLine = "\n";
-        size_t newLineoffset = existingFile.find_first_of("\n\r", 0, 2);
-        if (newLineoffset != std::string::npos)
-        {
-          newLine = existingFile[newLineoffset];
-
-          // Check for windows style \r\n
-          if (existingFile[newLineoffset] == '\r' && 
-              (newLineoffset + 1) < existingFile.size() &&
-              existingFile[newLineoffset + 1] == '\n')
-          {
-            newLine += '\n';
-          }
-        }
-
-        // Write header data
-        {
-          bool firstWrite = true;
-          for (const CSVHeader& header : newTable.m_headerData)
-          {
-            if (!firstWrite)
-            {
-              outFile += ",";
-            }
-            firstWrite = false;
-            outFile += header.m_fullField;
-          }
-        }
-        outFile += newLine;
-
-        // Write each row
-        for (const std::vector<FieldType>& row : newTable.m_rowData)
-        {
-          // Loop and write the fields
-          bool firstWrite = true;
-          for (const FieldType& field : row)
-          {
-            if (!firstWrite)
-            {
-              outFile += ",";
-            }
-            firstWrite = false;
-
-            // Get the field in string form
-            if (const std::string* accessField = std::get_if<std::string>(&field))
-            {
-              // If the fields contain a comma or quotes, put in quotes
-              size_t quoteOffset = accessField->find_first_of('"');
-              if (quoteOffset != std::string::npos ||
-                  accessField->find_first_of(',') != std::string::npos)
-              {
-                fieldStr = *accessField;
-                outFile += "\"";
-
-                // Replace all single quotes with double quotes // DT_TODO: Test this!
-                while (quoteOffset != std::string::npos)
-                {
-                  fieldStr.replace(quoteOffset, 1, 2, '"');
-                  quoteOffset = fieldStr.find_first_of('"', quoteOffset + 2);
-                }
-
-                outFile += fieldStr;
-                outFile += "\"";
-              }
-              else
-              {
-                // Add raw unmodified string
-                outFile += *accessField;
-              }
-            }
-            else
-            {
-              // Add number type
-              AppendToString(field, outFile);
-            }
-          }
-          outFile += newLine;
-        }
-
-        // Remove the newline if the existing file does not have it
-        if (!existingFile.ends_with(newLine))
-        {
-          outFile.erase(outFile.size() - newLine.size());
-        }
+        SaveToString(newTable, existingFile, outFile);
 
         // Check if the file data has changed and re-save it if it has
         if (existingFile != outFile)
@@ -867,7 +896,6 @@ int main(int argc, char* argv[])
           }
           file.close();
         }
-
       }
 
       // Add to a map of all the csv files
@@ -881,14 +909,11 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  // If checking table layout - format and compare against source
-
   // Add code gen of runtime types
 
-     // Handle enum tables
+     // Handle Enum tables
 
-     // Handle global tables
-       // Check that there is only one row
+     // Handle Global tables
 
   return 0;
 }
