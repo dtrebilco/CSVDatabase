@@ -43,6 +43,83 @@ struct CSVTable
   std::vector<std::vector<FieldType>> m_rowData;
 };
 
+static const char s_commonHeader[] = R"header(// Generated Database file - do not edit manually
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+#include <type_traits>
+
+namespace DB
+{
+  // Protected DB identifier type. The ID can only be created by the database and helper database methods.
+  template<typename T>
+  class IDType
+  {
+  public:
+    constexpr IDType() = default;
+    constexpr uint32_t GetIndex() const { return m_dbIndex; }
+    constexpr bool operator == (const IDType& val) const { return m_dbIndex == val.m_dbIndex; }
+    constexpr bool operator != (const IDType& val) const { return m_dbIndex != val.m_dbIndex; }
+    constexpr bool operator < (const IDType& val) const { return m_dbIndex < val.m_dbIndex; }
+
+  private:
+    friend class DB;
+    friend class IterType<T>;
+
+    uint32_t m_dbIndex = 0;
+
+    constexpr explicit IDType(uint32_t index) : m_dbIndex(index) {}
+  };
+
+  // Iterator type for database tables.
+  // Usage example for a "Character" table:
+  //  for (auto& i : Database.Iter<DB::Character>())
+  //  {
+  //    DB::Character::ID Id = i.GetID();
+  //    const DB::Character& Item = Iter.GetValue();
+  //  }
+  template <typename T>
+  class IterType
+  {
+  public:
+    struct Data
+    {
+      constexpr IDType<T> GetID() const { return IDType<T>(static_cast<uint32_t>(m_pos)); }
+      constexpr const T& GetValue() const { return m_dbArray[m_pos]; }
+
+    protected:
+      constexpr Data(size_t pos, const std::vector<T>& array) : m_pos(pos), m_dbArray(array) {}
+
+      size_t m_pos;
+      const std::vector<T>& m_dbArray;
+    };
+
+    struct Iterator : public Data
+    {
+      constexpr Iterator& operator++() { this->m_pos++; return *this; }
+      constexpr bool operator!=(const Iterator& val) const { return this->m_pos != val.m_pos; }
+      constexpr Data& operator *() { return *this; }
+
+    protected:
+      friend class IterType;
+      constexpr Iterator(size_t pos, const std::vector<T>& array) : Data(pos, array) {}
+    };
+
+    constexpr Iterator begin() { return Iterator(0, m_dbArray); }
+    constexpr Iterator end() { return Iterator(m_dbArray.size(), m_dbArray); }
+
+  private:
+    friend class DB;
+
+    constexpr explicit IterType(const std::vector<T>& array) : m_dbArray(array) {}
+    const std::vector<T>& m_dbArray;
+  };
+
+} // namespace DB
+)header";
+
 bool IsGlobalTable(std::string_view tableName) { return tableName.starts_with("Global"); }
 bool IsEnumTable(std::string_view tableName) { return tableName.starts_with("Enum"); }
 
@@ -776,20 +853,25 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
 int main(int argc, char* argv[])
 {
   // Check if directory path is provided
-  if (argc != 2)
+  if (argc < 2)
   {
-    OUTPUT_MESSAGE("Usage: CSVProcessor <directory_path>");
+    OUTPUT_MESSAGE("Usage: CSVProcessor <directory_path> <optional_output_path>");
     return 1;
   }
 
   // Get directory path from command line
   const char* dirPath = argv[1];
 
+  const char* outputPathStr = nullptr;
+  if (argc >= 3)
+  {
+    outputPathStr = argv[2];
+  }
+
   // Check if directory exists
   std::error_code error;
   std::filesystem::file_status dirPathStatus = std::filesystem::status(dirPath, error);
-  if (!std::filesystem::exists(dirPath) ||
-      !std::filesystem::is_directory(dirPathStatus))
+  if (!std::filesystem::is_directory(dirPathStatus))
   {
     OUTPUT_MESSAGE("Error: {} is not a valid directory", dirPath);
     return 1;
@@ -814,7 +896,7 @@ int main(int argc, char* argv[])
         std::ifstream file(entry.path(), std::ios::binary);
         if (!file.is_open())
         {
-          OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string().c_str());
+          OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string());
           return 1;
         }
 
@@ -829,7 +911,7 @@ int main(int argc, char* argv[])
 
         if (!file.read(csvFileData.data(), fileSize))
         {
-          OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string().c_str());
+          OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string());
           return 1;
         }
         file.close();
@@ -885,13 +967,13 @@ int main(int argc, char* argv[])
           std::ofstream file(entry.path(), std::ios::binary);
           if (!file.is_open())
           {
-            OUTPUT_MESSAGE("Error: Unable to open file for writing {}", entry.path().string().c_str());
+            OUTPUT_MESSAGE("Error: Unable to open file for writing {}", entry.path().string());
             return 1;
           }
 
           if (!file.write(outFile.data(), outFile.size()))
           {
-            OUTPUT_MESSAGE("Error: Unable to write file contents {}", entry.path().string().c_str());
+            OUTPUT_MESSAGE("Error: Unable to write file contents {}", entry.path().string());
             return 1;
           }
           file.close();
@@ -909,11 +991,46 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  // Add code gen of runtime types
+  if (outputPathStr)
+  {
+    std::filesystem::path outputPath(outputPathStr);
+    std::error_code error;
+    std::filesystem::file_status dirPathStatus = std::filesystem::status(outputPath, error);
+    if (!std::filesystem::is_directory(dirPathStatus))
+    {
+      OUTPUT_MESSAGE("Error: {} is not a valid directory", outputPathStr);
+      return 1;
+    }
 
-     // Handle Enum tables
+    std::filesystem::path outputPathHeader = outputPath / "DB.h";
 
-     // Handle Global tables
+    std::ofstream headerFile(outputPathHeader, std::ios::binary);
+    if (!headerFile.is_open())
+    {
+      OUTPUT_MESSAGE("Error: Unable to open file for writing {}", outputPathHeader.string());
+      return 1;
+    }
+
+    if (!headerFile.write(s_commonHeader, std::size(s_commonHeader) - 1)) // Exclude null terminator
+    {
+      OUTPUT_MESSAGE("Error: Unable to write to file {}", outputPathHeader.string());
+      return 1;
+    }
+
+
+
+    // Add code gen of runtime types
+
+    // Write out common DB util header
+
+      // OverrideIfDifferent(std::string_view newContents, std::string& workingBuffer, const std::filesystem::path& writePath);
+
+
+       // Handle Enum tables
+
+       // Handle Global tables
+  }
 
   return 0;
 }
+
