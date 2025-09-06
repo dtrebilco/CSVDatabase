@@ -53,72 +53,76 @@ static const char s_commonHeader[] = R"header(// Generated Database file - do no
 
 namespace DB
 {
-  // Protected DB identifier type. The ID can only be created by the database and helper database methods.
-  template<typename T>
-  class IDType
+
+// Protected DB identifier type. The ID can only be created by the database and helper database methods.
+template<typename T>
+class IDType
+{
+public:
+  constexpr IDType() = default;
+  constexpr uint32_t GetIndex() const { return m_dbIndex; }
+  constexpr bool operator == (const IDType& val) const { return m_dbIndex == val.m_dbIndex; }
+  constexpr bool operator != (const IDType& val) const { return m_dbIndex != val.m_dbIndex; }
+  constexpr bool operator < (const IDType& val) const { return m_dbIndex < val.m_dbIndex; }
+
+private:
+  friend class DB;
+  friend class IterType<T>;
+
+  uint32_t m_dbIndex = 0;
+
+  constexpr explicit IDType(uint32_t index) : m_dbIndex(index) {}
+};
+
+// Iterator type for database tables.
+// Usage example for a "Character" table:
+//  for (auto& i : Database.Iter<DB::Character>())
+//  {
+//    DB::Character::ID Id = i.GetID();
+//    const DB::Character& Item = Iter.GetValue();
+//  }
+template <typename T>
+class IterType
+{
+public:
+  struct Data
   {
-  public:
-    constexpr IDType() = default;
-    constexpr uint32_t GetIndex() const { return m_dbIndex; }
-    constexpr bool operator == (const IDType& val) const { return m_dbIndex == val.m_dbIndex; }
-    constexpr bool operator != (const IDType& val) const { return m_dbIndex != val.m_dbIndex; }
-    constexpr bool operator < (const IDType& val) const { return m_dbIndex < val.m_dbIndex; }
+    constexpr IDType<T> GetID() const { return IDType<T>(static_cast<uint32_t>(m_pos)); }
+    constexpr const T& GetValue() const { return m_dbArray[m_pos]; }
 
-  private:
-    friend class DB;
-    friend class IterType<T>;
+  protected:
+    constexpr Data(size_t pos, const std::vector<T>& array) : m_pos(pos), m_dbArray(array) {}
 
-    uint32_t m_dbIndex = 0;
-
-    constexpr explicit IDType(uint32_t index) : m_dbIndex(index) {}
-  };
-
-  // Iterator type for database tables.
-  // Usage example for a "Character" table:
-  //  for (auto& i : Database.Iter<DB::Character>())
-  //  {
-  //    DB::Character::ID Id = i.GetID();
-  //    const DB::Character& Item = Iter.GetValue();
-  //  }
-  template <typename T>
-  class IterType
-  {
-  public:
-    struct Data
-    {
-      constexpr IDType<T> GetID() const { return IDType<T>(static_cast<uint32_t>(m_pos)); }
-      constexpr const T& GetValue() const { return m_dbArray[m_pos]; }
-
-    protected:
-      constexpr Data(size_t pos, const std::vector<T>& array) : m_pos(pos), m_dbArray(array) {}
-
-      size_t m_pos;
-      const std::vector<T>& m_dbArray;
-    };
-
-    struct Iterator : public Data
-    {
-      constexpr Iterator& operator++() { this->m_pos++; return *this; }
-      constexpr bool operator!=(const Iterator& val) const { return this->m_pos != val.m_pos; }
-      constexpr Data& operator *() { return *this; }
-
-    protected:
-      friend class IterType;
-      constexpr Iterator(size_t pos, const std::vector<T>& array) : Data(pos, array) {}
-    };
-
-    constexpr Iterator begin() { return Iterator(0, m_dbArray); }
-    constexpr Iterator end() { return Iterator(m_dbArray.size(), m_dbArray); }
-
-  private:
-    friend class DB;
-
-    constexpr explicit IterType(const std::vector<T>& array) : m_dbArray(array) {}
+    size_t m_pos;
     const std::vector<T>& m_dbArray;
   };
 
-} // namespace DB
+  struct Iterator : public Data
+  {
+    constexpr Iterator& operator++() { this->m_pos++; return *this; }
+    constexpr bool operator!=(const Iterator& val) const { return this->m_pos != val.m_pos; }
+    constexpr Data& operator *() { return *this; }
+
+  protected:
+    friend class IterType;
+    constexpr Iterator(size_t pos, const std::vector<T>& array) : Data(pos, array) {}
+  };
+
+  constexpr Iterator begin() { return Iterator(0, m_dbArray); }
+  constexpr Iterator end() { return Iterator(m_dbArray.size(), m_dbArray); }
+
+private:
+  friend class DB;
+
+  constexpr explicit IterType(const std::vector<T>& array) : m_dbArray(array) {}
+  const std::vector<T>& m_dbArray;
+};
+
 )header";
+
+static const char s_commonFooter[] = R"footer(
+} // namespace DB
+)footer";
 
 bool IsGlobalTable(std::string_view tableName) { return tableName.starts_with("Global"); }
 bool IsEnumTable(std::string_view tableName) { return tableName.starts_with("Enum"); }
@@ -143,6 +147,30 @@ bool GetColumnType(std::string_view name, FieldType& retType)
 
   return false;
 }
+
+const char* CPPTypeString(const FieldType& var)
+{
+  return std::visit([]<typename T>(const T & e)
+  {
+    if constexpr (std::is_same_v<T, std::string>) { return "std::string"; }
+    else if constexpr (std::is_same_v<T, bool>) { return "bool"; }
+
+    else if constexpr (std::is_same_v<T, int8_t>) { return "int8_t"; }
+    else if constexpr (std::is_same_v<T, int16_t>) { return "int16_t"; }
+    else if constexpr (std::is_same_v<T, int32_t>) { return "int32_t"; }
+    else if constexpr (std::is_same_v<T, int64_t>) { return "int64_t"; }
+
+    else if constexpr (std::is_same_v<T, uint8_t>) { return "uint8_t"; }
+    else if constexpr (std::is_same_v<T, uint16_t>) { return "uint16_t"; }
+    else if constexpr (std::is_same_v<T, uint32_t>) { return "uint32_t"; }
+    else if constexpr (std::is_same_v<T, uint64_t>) { return "uint64_t"; }
+
+    else if constexpr (std::is_same_v<T, float>) { return "float"; }
+    else if constexpr (std::is_same_v<T, double>) { return "double"; }
+
+  }, var);
+}
+
 
 void AppendToString(const FieldType& var, std::string& appendStr)
 {
@@ -569,53 +597,59 @@ bool ReadTable(const char* fileString, CSVTable& newTable)
       }
     }
   }
+  return true;
+}
+
+bool SortTable(CSVTable & newTable)
+{
+  if (newTable.m_keyColumns.size() == 0 || newTable.m_rowData.size() <= 1)
+  {
+    return true;
+  }
 
   // Sort by the keys, check if duplicate rows
-  if (newTable.m_keyColumns.size() > 0 && newTable.m_rowData.size() > 1)
-  {
-    std::sort(newTable.m_rowData.begin(), newTable.m_rowData.end(),
-      [&newTable](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
-      {
-        for (uint32_t index : newTable.m_keyColumns)
-        {
-          if (a[index] < b[index])
-          {
-            return true;
-          }
-          if (a[index] != b[index])
-          {
-            break;
-          }
-        }
-        return false;
-      });
-
-    // Loop and check for duplicate rows
-    for (size_t r = 1; r < newTable.m_rowData.size(); r++)
+  std::sort(newTable.m_rowData.begin(), newTable.m_rowData.end(),
+    [&newTable](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
     {
-      const std::vector<FieldType>& prev = newTable.m_rowData[r - 1];
-      const std::vector<FieldType>& curr = newTable.m_rowData[r];
-
-      bool duplicate = true;
       for (uint32_t index : newTable.m_keyColumns)
       {
-        if (curr[index] != prev[index])
+        if (a[index] < b[index])
         {
-          duplicate = false;
+          return true;
+        }
+        if (a[index] != b[index])
+        {
           break;
         }
       }
-      if (duplicate)
+      return false;
+    });
+
+  // Loop and check for duplicate rows
+  for (size_t r = 1; r < newTable.m_rowData.size(); r++)
+  {
+    const std::vector<FieldType>& prev = newTable.m_rowData[r - 1];
+    const std::vector<FieldType>& curr = newTable.m_rowData[r];
+
+    bool duplicate = true;
+    for (uint32_t index : newTable.m_keyColumns)
+    {
+      if (curr[index] != prev[index])
       {
-        std::string errorKeys;
-        for (uint32_t index : newTable.m_keyColumns)
-        {
-          AppendToString(curr[index], errorKeys);
-          errorKeys += " ";
-        }
-        OUTPUT_MESSAGE("Error: Table has duplicate keys {}", errorKeys);
-        return false;
+        duplicate = false;
+        break;
       }
+    }
+    if (duplicate)
+    {
+      std::string errorKeys;
+      for (uint32_t index : newTable.m_keyColumns)
+      {
+        AppendToString(curr[index], errorKeys);
+        errorKeys += " ";
+      }
+      OUTPUT_MESSAGE("Error: Table has duplicate keys {}", errorKeys);
+      return false;
     }
   }
 
@@ -879,6 +913,7 @@ int main(int argc, char* argv[])
 
   // Iterate through files in directory
   std::unordered_map<std::string, CSVTable> tables;
+  std::unordered_map<std::string, CSVTable> rawEnumTables; // Unsorted raw enum tables
   std::vector<char> csvFileData;
   for (const auto& entry : std::filesystem::directory_iterator(dirPath))
   {
@@ -951,9 +986,19 @@ int main(int argc, char* argv[])
           OUTPUT_MESSAGE("Error: Enum table {} need three columns, single key and no foreign table links", tableName);
           return 1;
         }
+
+        // Store a copy of the raw table before sorting
+        rawEnumTables[tableName] = newTable;
       }
 
-      // Check if enum table and do not resave - as enums could get re-ordered //DT_TODO: add command line
+      // Sort the table data by column and check for duplicates
+      if (!SortTable(newTable))
+      {
+        OUTPUT_MESSAGE("Error: Enum table {} failed to sort", tableName);
+        return 1;
+      }
+
+      // Check if enum table and do not resave - as enums could get re-ordered //DT_TODO: add command line for resave of all tables
       if (!IsEnumTable(tableName))
       {
         std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
@@ -1002,7 +1047,56 @@ int main(int argc, char* argv[])
       return 1;
     }
 
+    // Add the common header
+    std::string outHeaderString = s_commonHeader;
+
+    // Write out all enum types
+    for (const auto& [tableName, table] : rawEnumTables)
+    {
+      if (table.m_rowData.size() > 0 && table.m_headerData.size() == 3)
+      {
+        std::string enumName = tableName.substr(4);
+        outHeaderString += "enum class " + enumName + " : " + CPPTypeString(table.m_headerData[1].m_type) + "\n{\n";
+        for (const std::vector<FieldType>& row : table.m_rowData)
+        {
+          outHeaderString += "  ";
+          AppendToString(row[0], outHeaderString);
+          outHeaderString += " = ";
+          AppendToString(row[1], outHeaderString);
+          
+          if (const std::string* accessField = std::get_if<std::string>(&row[2]))
+          {
+            if (accessField->size() > 0)
+            {
+              outHeaderString += " // ";
+              outHeaderString += *accessField;
+            }
+          }
+          outHeaderString += ",\n";
+        }
+        outHeaderString += "};\n";
+
+        //DT_TODO: Find if the enum starts at 0 and ascends by one each time
+        //     constexpr uint32_t enumName_MAX = 4; // For using enum in arrays
+
+        outHeaderString += "const char* to_string(" + enumName + " value);\n";
+        outHeaderString += "bool find_enum(const char* Name, " + enumName + "& out);\n";
+        
+        // Write out functions in cpp file
+          // Use sorted arrays for lookups
+      }
+    }
+
+
+    // Sort table names based on the reference order
+
+
+
+    outHeaderString += s_commonFooter;
+
     std::filesystem::path outputPathHeader = outputPath / "DB.h";
+
+    // DT_TODO: Read existing header, compare and only overwrite if different
 
     std::ofstream headerFile(outputPathHeader, std::ios::binary);
     if (!headerFile.is_open())
@@ -1011,7 +1105,7 @@ int main(int argc, char* argv[])
       return 1;
     }
 
-    if (!headerFile.write(s_commonHeader, std::size(s_commonHeader) - 1)) // Exclude null terminator
+    if (!headerFile.write(outHeaderString.data(), outHeaderString.size()))
     {
       OUTPUT_MESSAGE("Error: Unable to write to file {}", outputPathHeader.string());
       return 1;
