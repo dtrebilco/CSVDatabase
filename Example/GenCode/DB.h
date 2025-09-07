@@ -78,7 +78,8 @@ enum class WeaponTypes : uint8_t
   None = 0 // A none type of weapon,
   Gun = 1 // A gun type of weapon,
 };
+constexpr uint32_t WeaponTypes_MAX = 2; // For using the enum in lookup arrays
 const char* to_string(WeaponTypes value);
-bool Find(const char* Name, WeaponTypes& out);
+bool find_enum(const char* Name, WeaponTypes& out);
 
 } // namespace DB

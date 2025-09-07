@@ -174,7 +174,7 @@ const char* CPPTypeString(const FieldType& var)
 
 void AppendToString(const FieldType& var, std::string& appendStr)
 {
-  return std::visit([&appendStr]<typename T>(const T & e)
+  std::visit([&appendStr]<typename T>(const T & e)
   {
     if constexpr (std::is_same_v<T, std::string>)
     {
@@ -212,6 +212,21 @@ std::string to_string(const FieldType& var)
   std::string ret;
   AppendToString(var, ret);
   return ret;
+}
+
+bool IsEqual(const FieldType& var, size_t val)
+{
+  return std::visit([val]<typename T>(const T & e)
+  {
+    if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, bool>)
+    {
+      return false;
+    }
+    else
+    {
+      return e == val;
+    }
+  }, var);
 }
 
 template <typename T>
@@ -1057,6 +1072,8 @@ int main(int argc, char* argv[])
       {
         std::string enumName = tableName.substr(4);
         outHeaderString += "enum class " + enumName + " : " + CPPTypeString(table.m_headerData[1].m_type) + "\n{\n";
+        size_t enumCounter = 0;
+        bool isSequential = true;
         for (const std::vector<FieldType>& row : table.m_rowData)
         {
           outHeaderString += "  ";
@@ -1064,6 +1081,13 @@ int main(int argc, char* argv[])
           outHeaderString += " = ";
           AppendToString(row[1], outHeaderString);
           
+          // Check if a sequential enum
+          if (isSequential && !IsEqual(row[1], enumCounter))
+          {
+            isSequential = false;
+          }
+          enumCounter++;
+
           if (const std::string* accessField = std::get_if<std::string>(&row[2]))
           {
             if (accessField->size() > 0)
@@ -1076,8 +1100,11 @@ int main(int argc, char* argv[])
         }
         outHeaderString += "};\n";
 
-        //DT_TODO: Find if the enum starts at 0 and ascends by one each time
-        //     constexpr uint32_t enumName_MAX = 4; // For using enum in arrays
+        // Find if the enum starts at 0 and ascends by one each time
+        if (isSequential)
+        {
+          outHeaderString += "constexpr uint32_t " + enumName + "_MAX = " + to_string(enumCounter) + "; // For using the enum in lookup arrays\n";
+        }
 
         outHeaderString += "const char* to_string(" + enumName + " value);\n";
         outHeaderString += "bool find_enum(const char* Name, " + enumName + "& out);\n";
