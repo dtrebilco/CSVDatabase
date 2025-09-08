@@ -11,6 +11,7 @@
 #include <algorithm>
 
 // TODO: Add test where the key is a foreign key - part of a multi key also
+//       Test when key is int type and what to do when referenced by a foreign key
 // Test min max range of each type parsing - with/without min max
 // TODO: Remove ColumnType and just have a default? Also remove min/max?
 // TODO: Have columns of the same type - and parse inline to the final format
@@ -43,7 +44,7 @@ struct CSVTable
   std::vector<std::vector<FieldType>> m_rowData;
 };
 
-static const char s_commonHeader[] = R"header(// Generated Database file - do not edit manually
+static const char s_commonHeaderStart[] = R"header(// Generated Database file - do not edit manually
 #pragma once
 
 #include <cstddef>
@@ -120,9 +121,18 @@ private:
 
 )header";
 
-static const char s_commonFooter[] = R"footer(
+static const char s_commonHeaderEnd[] = R"header(
 } // namespace DB
-)footer";
+)header";
+
+
+static const char s_commonBodyStart[] = R"body(// Generated Database file - do not edit manually
+#include "DB.h"
+
+)body";
+
+static const char s_commonBodyEnd[] = R"body()body";
+
 
 bool IsGlobalTable(std::string_view tableName) { return tableName.starts_with("Global"); }
 bool IsEnumTable(std::string_view tableName) { return tableName.starts_with("Enum"); }
@@ -1063,18 +1073,21 @@ int main(int argc, char* argv[])
     }
 
     // Add the common header
-    std::string outHeaderString = s_commonHeader;
+    std::string outHeaderString = s_commonHeaderStart;
+    std::string outBodyString = s_commonBodyStart;
 
     // Write out all enum types
-    for (const auto& [tableName, table] : rawEnumTables)
+    for (const auto& [tableName, rawTable] : rawEnumTables)
     {
-      if (table.m_rowData.size() > 0 && table.m_headerData.size() == 3)
+      const CSVTable& sortedTable = tables[tableName];
+
+      if (rawTable.m_rowData.size() > 0 && rawTable.m_headerData.size() == 3)
       {
         std::string enumName = tableName.substr(4);
-        outHeaderString += "enum class " + enumName + " : " + CPPTypeString(table.m_headerData[1].m_type) + "\n{\n";
+        outHeaderString += "enum class " + enumName + " : " + CPPTypeString(rawTable.m_headerData[1].m_type) + "\n{\n";
         size_t enumCounter = 0;
         bool isSequential = true;
-        for (const std::vector<FieldType>& row : table.m_rowData)
+        for (const std::vector<FieldType>& row : rawTable.m_rowData)
         {
           outHeaderString += "  ";
           AppendToString(row[0], outHeaderString);
@@ -1107,10 +1120,57 @@ int main(int argc, char* argv[])
         }
 
         outHeaderString += "const char* to_string(" + enumName + " value);\n";
-        outHeaderString += "bool find_enum(const char* Name, " + enumName + "& out);\n";
+        outHeaderString += "bool find_enum(std::string_view name, " + enumName + "& out);\n";
         
         // Write out functions in cpp file
-          // Use sorted arrays for lookups
+        outBodyString += "const char* DB::to_string(" + enumName +" value)\n{\n";
+        outBodyString += "  switch (value)\n  {\n";
+
+        // Use sorted arrays for lookups
+        for (const std::vector<FieldType>& row : sortedTable.m_rowData)
+        {
+          outBodyString += "  case(" + enumName + "::";
+          AppendToString(row[0], outBodyString);
+          outBodyString += "): return \"";
+          AppendToString(row[0], outBodyString);
+          outBodyString += "\";\n";
+        }
+        outBodyString += "  }\n  return \"\";\n}\n\n";
+
+        outBodyString += "bool DB::find_enum(std::string_view name, " + enumName + "& out)\n{\n";
+        outBodyString += "  std::string_view names[] =\n  {\n";
+        for (const std::vector<FieldType>& row : sortedTable.m_rowData)
+        {
+          outBodyString += "    \"";
+          AppendToString(row[0], outBodyString);
+          outBodyString += "\",\n";
+        }
+        outBodyString += "  };\n";
+
+        outBodyString += "  " + enumName + " values[] =\n  {\n";
+        for (const std::vector<FieldType>& row : sortedTable.m_rowData)
+        {
+          outBodyString += "    ";
+          outBodyString += enumName;
+          outBodyString += "::";
+          AppendToString(row[0], outBodyString);
+          outBodyString += ",\n";
+        }
+        outBodyString += "  };\n";
+
+        outBodyString += "  auto lowerBound = std::lower_bound(std::begin(names), std::end(names), name);\n";
+        outBodyString += "  if (lowerBound == std::end(names) ||\n";
+        outBodyString += "      *lowerBound != name)\n";
+        outBodyString += "  {\n";
+        outBodyString += "    out = " + enumName + "::";
+        AppendToString(rawTable.m_rowData[0][0], outBodyString);
+        outBodyString += ";\n";
+        outBodyString += "    return false;\n";
+        outBodyString += "  }\n";
+        outBodyString += "  out = values[std::distance(std::begin(names), lowerBound)];\n";
+        outBodyString += "  return true;\n";
+        outBodyString += "}\n";
+
       }
     }
 
@@ -1119,26 +1179,40 @@ int main(int argc, char* argv[])
 
 
 
-    outHeaderString += s_commonFooter;
-
-    std::filesystem::path outputPathHeader = outputPath / "DB.h";
+    outHeaderString += s_commonHeaderEnd;
+    outBodyString += s_commonBodyEnd;
 
     // DT_TODO: Read existing header, compare and only overwrite if different
-
-    std::ofstream headerFile(outputPathHeader, std::ios::binary);
-    if (!headerFile.is_open())
     {
-      OUTPUT_MESSAGE("Error: Unable to open file for writing {}", outputPathHeader.string());
-      return 1;
-    }
+      std::filesystem::path outputPathHeader = outputPath / "DB.h";
+      std::ofstream headerFile(outputPathHeader, std::ios::binary);
+      if (!headerFile.is_open())
+      {
+        OUTPUT_MESSAGE("Error: Unable to open file for writing {}", outputPathHeader.string());
+        return 1;
+      }
 
-    if (!headerFile.write(outHeaderString.data(), outHeaderString.size()))
+      if (!headerFile.write(outHeaderString.data(), outHeaderString.size()))
+      {
+        OUTPUT_MESSAGE("Error: Unable to write to file {}", outputPathHeader.string());
+        return 1;
+      }
+    }
     {
-      OUTPUT_MESSAGE("Error: Unable to write to file {}", outputPathHeader.string());
-      return 1;
+      std::filesystem::path outputPathBody = outputPath / "DB.cpp";
+      std::ofstream bodyFile(outputPathBody, std::ios::binary);
+      if (!bodyFile.is_open())
+      {
+        OUTPUT_MESSAGE("Error: Unable to open file for writing {}", outputPathBody.string());
+        return 1;
+      }
+
+      if (!bodyFile.write(outBodyString.data(), outBodyString.size()))
+      {
+        OUTPUT_MESSAGE("Error: Unable to write to file {}", outputPathBody.string());
+        return 1;
+      }
     }
-
-
 
     // Add code gen of runtime types
 
@@ -1155,3 +1229,7 @@ int main(int argc, char* argv[])
   return 0;
 }
 
+
+/*
+
+*/

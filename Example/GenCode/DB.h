@@ -80,6 +80,6 @@ enum class WeaponTypes : uint8_t
 };
 constexpr uint32_t WeaponTypes_MAX = 2; // For using the enum in lookup arrays
 const char* to_string(WeaponTypes value);
-bool find_enum(const char* Name, WeaponTypes& out);
+bool find_enum(std::string_view name, WeaponTypes& out);
 
 } // namespace DB
