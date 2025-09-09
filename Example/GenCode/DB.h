@@ -3,8 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
-#include <type_traits>
 
 namespace DB
 {
@@ -22,7 +22,7 @@ public:
 
 private:
   friend class DB;
-  friend class IterType<T>;
+  template<typename T> friend class IterType;
 
   uint32_t m_dbIndex = 0;
 
@@ -75,8 +75,8 @@ private:
 
 enum class WeaponTypes : uint8_t
 {
-  None = 0 // A none type of weapon,
-  Gun = 1 // A gun type of weapon,
+  None = 0, // A none type of weapon
+  Gun = 1, // A gun type of weapon
 };
 constexpr uint32_t WeaponTypes_MAX = 2; // For using the enum in lookup arrays
 const char* to_string(WeaponTypes value);

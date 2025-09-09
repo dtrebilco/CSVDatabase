@@ -49,8 +49,8 @@ static const char s_commonHeaderStart[] = R"header(// Generated Database file - 
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
-#include <type_traits>
 
 namespace DB
 {
@@ -68,7 +68,7 @@ public:
 
 private:
   friend class DB;
-  friend class IterType<T>;
+  template<typename T> friend class IterType;
 
   uint32_t m_dbIndex = 0;
 
@@ -1093,7 +1093,8 @@ int main(int argc, char* argv[])
           AppendToString(row[0], outHeaderString);
           outHeaderString += " = ";
           AppendToString(row[1], outHeaderString);
-          
+          outHeaderString += ",";
+
           // Check if a sequential enum
           if (isSequential && !IsEqual(row[1], enumCounter))
           {
@@ -1109,7 +1110,7 @@ int main(int argc, char* argv[])
               outHeaderString += *accessField;
             }
           }
-          outHeaderString += ",\n";
+          outHeaderString += "\n";
         }
         outHeaderString += "};\n";
 
