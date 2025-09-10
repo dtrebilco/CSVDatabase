@@ -34,6 +34,7 @@ struct CSVHeader
 
   std::string m_comment;     // Comment field (if any)
   std::string m_foreignTable;// Foreign table link (if any)
+  bool m_isWeakForeignTable = false; // If a foreign table link is a weak link
 };
 
 struct CSVTable
@@ -441,6 +442,7 @@ bool ReadHeader(std::string_view field, CSVHeader& out)
         }
 
         out.m_foreignTable.assign(tag, 1, tag.size() - 1);
+        out.m_isWeakForeignTable = tag[0] == '*';
       }
       else if (tag == "key")
       {
@@ -909,6 +911,107 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
   }
 }
 
+bool CalculateTableDepth(const std::string& tableName, const std::unordered_map<std::string, CSVTable>& tables, std::unordered_map<std::string, uint32_t>& tableDepths, uint32_t& depth)
+{
+  // Enum tables have no depth
+  if (IsEnumTable(tableName))
+  {
+    return true;
+  }
+
+  // See if already processed
+  auto existingDepth = tableDepths.find(tableName);
+  if (existingDepth != tableDepths.end())
+  {
+    depth = existingDepth->second;
+
+    // Check for a loop in the tree of table links
+    if (depth == std::numeric_limits<uint32_t>::max())
+    {
+      OUTPUT_MESSAGE("Error: Table {} has loop to table {}", tableName, tableName);
+      return false;
+    }
+
+    return true;
+  }
+
+  // Reserve the depth slot
+  tableDepths[tableName] = std::numeric_limits<uint32_t>::max();
+
+  const CSVTable& table = tables.find(tableName)->second;
+
+  for (const CSVHeader& header : table.m_headerData)
+  {
+    if (header.m_foreignTable.size() > 0 && !header.m_isWeakForeignTable)
+    {
+      // Recurse
+      uint32_t newDepth = 0;
+      if (!CalculateTableDepth(header.m_foreignTable, tables, tableDepths, newDepth))
+      {
+        return false;
+      }
+
+      // Check if this is a new max depth
+      if ((newDepth + 1) > depth)
+      {
+        depth = newDepth + 1;
+      }
+    }
+  }
+
+  tableDepths[tableName] = depth;
+  return true;
+}
+
+
+/*
+bool CalculateTableDepth(const std::string& tableName, const std::unordered_map<std::string, CSVTable>& tables, std::unordered_map<std::string, uint32_t>& tableDepths, const std::unordered_set<std::string>& procesingTables, uint32_t& depth)
+{
+  const CSVTable& table = tables.find(tableName)->second;
+
+  for (const CSVHeader& header : table.m_headerData)
+  {
+    if (header.m_foreignTable.size() > 0 && !header.m_isWeakForeignTable)
+    {
+      // See if in the already processed set
+      if (procesingTables.find(header.m_foreignTable) != procesingTables.end())
+      {
+        OUTPUT_MESSAGE("Error: Table {} has loop to table {}", tableName, header.m_foreignTable);
+        return false;
+      }
+
+      // Check if already calculated
+      uint32_t newDepth = 0;
+      auto existingDepth = tableDepths.find(header.m_foreignTable);
+      if (existingDepth != tableDepths.end())
+      {
+        newDepth = existingDepth->second;
+      }
+      else
+      {
+        std::unordered_set<std::string> recurseSet = procesingTables;
+        recurseSet.insert(header.m_foreignTable);
+
+        // Recurse
+        if (!CalculateTableDepth(tables, header.m_foreignTable, tableDepths, recurseSet, newDepth))
+        {
+          return false;
+        }
+
+        tableDepths[header.m_foreignTable] = newDepth;
+      }
+
+      // Check if this is a new max depth
+      if ((newDepth + 1) > depth)
+      {
+        depth = newDepth + 1;
+      }
+    }
+  }
+
+  return true;
+}
+*/
 int main(int argc, char* argv[])
 {
   // Check if directory path is provided
@@ -1177,6 +1280,39 @@ int main(int argc, char* argv[])
 
 
     // Sort table names based on the reference order
+    std::unordered_map<std::string, uint32_t> tableDepths;
+
+    std::unordered_set<std::string> procesingTables;
+
+    // Create an array of all table names
+
+    // Create an array of reference counts
+
+    // Create an array of used tables bools to look for loops
+
+
+       // Mark each table as used, then process children
+
+         // If already used, flag loop error
+
+
+
+
+    // Write pre-declare loop reference count types (if not "this" type)
+
+
+
+    for (const auto& [tableName, table] : tables)
+    {
+      uint32_t depth = 0;
+      if (!CalculateTableDepth(tableName, tables, tableDepths, depth))
+      {
+        OUTPUT_MESSAGE("Error: {} Recursive table link - Use \"*TableName\" instead of +TabeName on one link", tableName);
+        return 1;
+      }
+    }
+
+    // Sort by count then by name
 
 
 
