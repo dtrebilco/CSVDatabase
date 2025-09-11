@@ -50,8 +50,9 @@ static const char s_commonHeaderStart[] = R"header(// Generated Database file - 
 
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
 #include <vector>
+#include <string>
+#include <string_view>
 
 namespace DB
 {
@@ -555,7 +556,7 @@ bool ReadTable(const char* fileString, CSVTable& newTable)
         OUTPUT_MESSAGE("Error: Table has duplicate column name {}", header.m_name);
         return false;
       }
-      uniqueCheck.insert(header.m_name);
+      uniqueCheck.insert(header.m_name); // DT_TODO: This will not catch multiple columns with the same name if multiple foreign tables with the same base name
     }
   }
 
@@ -963,55 +964,6 @@ bool CalculateTableDepth(const std::string& tableName, const std::unordered_map<
   return true;
 }
 
-
-/*
-bool CalculateTableDepth(const std::string& tableName, const std::unordered_map<std::string, CSVTable>& tables, std::unordered_map<std::string, uint32_t>& tableDepths, const std::unordered_set<std::string>& procesingTables, uint32_t& depth)
-{
-  const CSVTable& table = tables.find(tableName)->second;
-
-  for (const CSVHeader& header : table.m_headerData)
-  {
-    if (header.m_foreignTable.size() > 0 && !header.m_isWeakForeignTable)
-    {
-      // See if in the already processed set
-      if (procesingTables.find(header.m_foreignTable) != procesingTables.end())
-      {
-        OUTPUT_MESSAGE("Error: Table {} has loop to table {}", tableName, header.m_foreignTable);
-        return false;
-      }
-
-      // Check if already calculated
-      uint32_t newDepth = 0;
-      auto existingDepth = tableDepths.find(header.m_foreignTable);
-      if (existingDepth != tableDepths.end())
-      {
-        newDepth = existingDepth->second;
-      }
-      else
-      {
-        std::unordered_set<std::string> recurseSet = procesingTables;
-        recurseSet.insert(header.m_foreignTable);
-
-        // Recurse
-        if (!CalculateTableDepth(tables, header.m_foreignTable, tableDepths, recurseSet, newDepth))
-        {
-          return false;
-        }
-
-        tableDepths[header.m_foreignTable] = newDepth;
-      }
-
-      // Check if this is a new max depth
-      if ((newDepth + 1) > depth)
-      {
-        depth = newDepth + 1;
-      }
-    }
-  }
-
-  return true;
-}
-*/
 int main(int argc, char* argv[])
 {
   // Check if directory path is provided
@@ -1274,34 +1226,11 @@ int main(int argc, char* argv[])
         outBodyString += "  out = values[std::distance(std::begin(names), lowerBound)];\n";
         outBodyString += "  return true;\n";
         outBodyString += "}\n";
-
       }
     }
 
-
     // Sort table names based on the reference order
     std::unordered_map<std::string, uint32_t> tableDepths;
-
-    std::unordered_set<std::string> procesingTables;
-
-    // Create an array of all table names
-
-    // Create an array of reference counts
-
-    // Create an array of used tables bools to look for loops
-
-
-       // Mark each table as used, then process children
-
-         // If already used, flag loop error
-
-
-
-
-    // Write pre-declare loop reference count types (if not "this" type)
-
-
-
     for (const auto& [tableName, table] : tables)
     {
       uint32_t depth = 0;
@@ -1313,8 +1242,83 @@ int main(int argc, char* argv[])
     }
 
     // Sort by count then by name
+    std::vector<std::tuple< uint32_t, std::string>> tableOrdering;
+    for (const auto& [tableName, order] : tableDepths)
+    {
+      tableOrdering.emplace_back(order, tableName);
+    }
+    std::sort(tableOrdering.begin(), tableOrdering.end());
 
+    // Write out each table
+    std::vector<std::string> writtenLinks;
+    for (const auto& [_, tableName] : tableOrdering)
+    {
+      const CSVTable& writeTable = tables[tableName];
 
+      //DT_TODO: Write pre-declare loop reference count types (if not "this" type)
+
+      outHeaderString += "\nclass " + tableName + "\n{\npublic:\n";
+      outHeaderString += "  typedef IDType<" + tableName + "> ID;\n";
+      outHeaderString += "  typedef const IterType<" + tableName + ">::Data Iter;\n\n";
+
+      writtenLinks.resize(0);
+      for (const CSVHeader& header : writeTable.m_headerData)
+      {
+        // Test if a table link
+        if (header.m_foreignTable.size() > 0)
+        {
+          if (IsEnumTable(header.m_foreignTable))
+          {
+            std::string enumName = header.m_foreignTable.substr(4);
+            outHeaderString += "  ";
+            outHeaderString += enumName;
+            outHeaderString += " ";
+            outHeaderString += header.m_name;
+            outHeaderString += " = ";
+            outHeaderString += enumName;
+            outHeaderString += "::";
+            AppendToString(rawEnumTables[header.m_foreignTable].m_rowData[0][0], outHeaderString);
+            outHeaderString += ";\n";
+          }
+          else
+          {
+            // Check if the link has already been processed
+            std::string newLinkName = header.m_name.substr(0, header.m_name.find_first_of(':'));
+            if (std::find(writtenLinks.begin(), writtenLinks.end(), newLinkName) == writtenLinks.end())
+            {
+              writtenLinks.push_back(newLinkName);
+
+              outHeaderString += "  ";
+              outHeaderString += header.m_foreignTable;
+              outHeaderString += "::ID ";
+              outHeaderString += newLinkName;
+              outHeaderString += ";\n";
+            }
+          }
+        }
+        else
+        {
+          outHeaderString += "  ";
+          outHeaderString += CPPTypeString(header.m_type);
+          outHeaderString += " ";
+          outHeaderString += header.m_name;
+
+          if (const std::string* accessField = std::get_if<std::string>(&(header.m_type)))
+          {
+          }
+          else if (const bool* accessField = std::get_if<bool>(&(header.m_type)))
+          {
+            outHeaderString += " = false"; // Perhaps set a value based on min / max ?
+          }
+          else
+          {
+            outHeaderString += " = 0";
+          }
+          outHeaderString += ";\n";
+        }
+      }
+      outHeaderString += "};\n";
+    }
 
     outHeaderString += s_commonHeaderEnd;
     outBodyString += s_commonBodyEnd;

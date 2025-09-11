@@ -3,8 +3,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
 #include <vector>
+#include <string>
+#include <string_view>
 
 namespace DB
 {
@@ -81,5 +82,46 @@ enum class WeaponTypes : uint8_t
 constexpr uint32_t WeaponTypes_MAX = 2; // For using the enum in lookup arrays
 const char* to_string(WeaponTypes value);
 bool find_enum(std::string_view name, WeaponTypes& out);
+
+class SpecialWeapons
+{
+public:
+  typedef IDType<SpecialWeapons> ID;
+  typedef const IterType<SpecialWeapons>::Data Iter;
+
+  std::string Name;
+  WeaponTypes Type = WeaponTypes::None;
+  SpecialWeapons::ID Default;
+};
+
+class Weapons
+{
+public:
+  typedef IDType<Weapons> ID;
+  typedef const IterType<Weapons>::Data Iter;
+
+  std::string Name;
+  WeaponTypes Type = WeaponTypes::None;
+};
+
+class Characters
+{
+public:
+  typedef IDType<Characters> ID;
+  typedef const IterType<Characters>::Data Iter;
+
+  std::string Name;
+  Weapons::ID LeftWeapon;
+  Weapons::ID RightWeapon;
+};
+
+class GlobalNones
+{
+public:
+  typedef IDType<GlobalNones> ID;
+  typedef const IterType<GlobalNones>::Data Iter;
+
+  Weapons::ID Weapon;
+};
 
 } // namespace DB
