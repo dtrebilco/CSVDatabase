@@ -1131,7 +1131,7 @@ int main(int argc, char* argv[])
     std::string outHeaderString = s_commonHeaderStart;
     std::string outBodyString = s_commonBodyStart;
 
-    // Write out all enum types
+    // Write out all enum types // DT_TODO: Sort enums by name for consistency in output?
     for (const auto& [tableName, rawTable] : rawEnumTables)
     {
       const CSVTable& sortedTable = tables[tableName];
@@ -1258,8 +1258,8 @@ int main(int argc, char* argv[])
       //DT_TODO: Write pre-declare loop reference count types (if not "this" type)
 
       outHeaderString += "\nclass " + tableName + "\n{\npublic:\n";
-      outHeaderString += "  typedef IDType<" + tableName + "> ID;\n";
-      outHeaderString += "  typedef const IterType<" + tableName + ">::Data Iter;\n\n";
+      outHeaderString += "  using ID = IDType<" + tableName + ">;\n";
+      outHeaderString += "  using Iter = const IterType<" + tableName + ">::Data;\n\n";
 
       writtenLinks.resize(0);
       for (const CSVHeader& header : writeTable.m_headerData)
@@ -1318,6 +1318,37 @@ int main(int argc, char* argv[])
         }
       }
       outHeaderString += "};\n";
+    }
+
+    // Write the main database table
+    outHeaderString += "\nclass DB\n{\npublic:\n\n";
+
+    outHeaderString += "  template<typename T> const std::vector<T>& GetTable() const;\n";
+    outHeaderString += "  template<typename T> IterType<T> Iter() const { return IterType<T>(GetTable<T>()); }\n";
+    outHeaderString += "  template<typename T> const T& Get(IDType<T> id) const { return GetTable<T>()[id.m_dbIndex]; }\n";
+    outHeaderString += "  template<typename T> bool ToID(uint32_t index, IDType<T>& id) const { if (index < GetTable<T>().size()) { id = IDType<T>(index); return true; } return false; }\n\n";
+
+
+    for (const auto& [_, tableName] : tableOrdering)
+    {
+      if (IsGlobalTable(tableName))
+      {
+        outHeaderString += "  " + tableName + " " + tableName + "Values;\n";
+      }
+      else
+      {
+        outHeaderString += "  std::vector<" + tableName + "> " + tableName + "Values;\n";
+      }
+    }
+
+    outHeaderString += "};\n";
+
+    for (const auto& [_, tableName] : tableOrdering)
+    {
+      if (!IsGlobalTable(tableName))
+      {
+        outHeaderString += "template<> inline const std::vector<" + tableName + ">& DB::GetTable() const { return " + tableName + "Values; }\n";
+      }
     }
 
     outHeaderString += s_commonHeaderEnd;

@@ -86,8 +86,8 @@ bool find_enum(std::string_view name, WeaponTypes& out);
 class SpecialWeapons
 {
 public:
-  typedef IDType<SpecialWeapons> ID;
-  typedef const IterType<SpecialWeapons>::Data Iter;
+  using ID = IDType<SpecialWeapons>;
+  using Iter = const IterType<SpecialWeapons>::Data;
 
   std::string Name;
   WeaponTypes Type = WeaponTypes::None;
@@ -97,8 +97,8 @@ public:
 class Weapons
 {
 public:
-  typedef IDType<Weapons> ID;
-  typedef const IterType<Weapons>::Data Iter;
+  using ID = IDType<Weapons>;
+  using Iter = const IterType<Weapons>::Data;
 
   std::string Name;
   WeaponTypes Type = WeaponTypes::None;
@@ -107,8 +107,8 @@ public:
 class Characters
 {
 public:
-  typedef IDType<Characters> ID;
-  typedef const IterType<Characters>::Data Iter;
+  using ID = IDType<Characters>;
+  using Iter = const IterType<Characters>::Data;
 
   std::string Name;
   Weapons::ID LeftWeapon;
@@ -118,10 +118,28 @@ public:
 class GlobalNones
 {
 public:
-  typedef IDType<GlobalNones> ID;
-  typedef const IterType<GlobalNones>::Data Iter;
+  using ID = IDType<GlobalNones>;
+  using Iter = const IterType<GlobalNones>::Data;
 
   Weapons::ID Weapon;
 };
+
+class DB
+{
+public:
+
+  template<typename T> const std::vector<T>& GetTable() const;
+  template<typename T> IterType<T> Iter() const { return IterType<T>(GetTable<T>()); }
+  template<typename T> const T& Get(IDType<T> id) const { return GetTable<T>()[id.m_dbIndex]; }
+  template<typename T> bool ToID(uint32_t index, IDType<T>& id) const { if (index < GetTable<T>().size()) { id = IDType<T>(index); return true; } return false; }
+
+  std::vector<SpecialWeapons> SpecialWeaponsValues;
+  std::vector<Weapons> WeaponsValues;
+  std::vector<Characters> CharactersValues;
+  GlobalNones GlobalNonesValues;
+};
+template<> inline const std::vector<SpecialWeapons>& DB::GetTable() const { return SpecialWeaponsValues; }
+template<> inline const std::vector<Weapons>& DB::GetTable() const { return WeaponsValues; }
+template<> inline const std::vector<Characters>& DB::GetTable() const { return CharactersValues; }
 
 } // namespace DB
