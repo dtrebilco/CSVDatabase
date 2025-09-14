@@ -1328,6 +1328,109 @@ int main(int argc, char* argv[])
     outHeaderString += "  template<typename T> const T& Get(IDType<T> id) const { return GetTable<T>()[id.m_dbIndex]; }\n";
     outHeaderString += "  template<typename T> bool ToID(uint32_t index, IDType<T>& id) const { if (index < GetTable<T>().size()) { id = IDType<T>(index); return true; } return false; }\n\n";
 
+    // Add Find() methods - type string, param name string, member name string
+    std::vector<std::tuple<std::string, std::string, std::string>> params;
+    for (const auto& [_, tableName] : tableOrdering)
+    {
+      if (IsGlobalTable(tableName))
+      {
+        continue;
+      }
+      const CSVTable& table = tables[tableName];
+
+      writtenLinks.resize(0);
+      params.resize(0);
+      for (uint32_t columnID : table.m_keyColumns)
+      {
+        const CSVHeader& header = table.m_headerData[columnID];
+        std::string writeHeaderName = header.m_name;
+        writeHeaderName[0] = std::tolower(writeHeaderName[0]);
+
+        // Test if a table link
+        if (header.m_foreignTable.size() > 0)
+        {
+          if (IsEnumTable(header.m_foreignTable))
+          {
+            params.emplace_back(header.m_foreignTable.substr(4), writeHeaderName, header.m_name);
+          }
+          else
+          {
+            // Check if the link has already been processed
+            std::string newLinkName = header.m_name.substr(0, header.m_name.find_first_of(':'));
+            if (std::find(writtenLinks.begin(), writtenLinks.end(), newLinkName) == writtenLinks.end() && newLinkName.size() > 0)
+            {
+              writtenLinks.push_back(newLinkName);
+              writeHeaderName = newLinkName;
+              writeHeaderName[0] = std::tolower(writeHeaderName[0]);
+              params.emplace_back(header.m_foreignTable + "::ID", writeHeaderName, newLinkName);
+            }
+          }
+        }
+        else
+        {
+          if (const std::string* accessField = std::get_if<std::string>(&(header.m_type)))
+          {
+            params.emplace_back("std::string_view", writeHeaderName, header.m_name);
+          }
+          else
+          {
+            params.emplace_back(CPPTypeString(header.m_type), writeHeaderName, header.m_name);
+          }
+        }
+      }
+
+      outHeaderString += "  bool Find(";
+      for (auto& [type, name, _] : params)
+      {
+        outHeaderString += type;
+        outHeaderString += " ";
+        outHeaderString += name;
+        outHeaderString += ", ";
+      }
+      outHeaderString += tableName;
+      outHeaderString += "::ID& ret) const;\n";
+
+      outBodyString += "\nbool DB::DB::Find(";
+      for (auto& [type, name, _] : params)
+      {
+        outBodyString += type;
+        outBodyString += " ";
+        outBodyString += name;
+        outBodyString += ", ";
+      }
+      outBodyString += tableName;
+      outBodyString += "::ID& ret) const\n{\n";
+
+      outBodyString += "  auto searchLowerBound = std::lower_bound(" + tableName + "Values.begin(), " + tableName + "Values.end(), 0, [&](const " + tableName + "& left, int)\n  {\n";
+
+      outBodyString += "    return ";
+      std::string equalStr;
+      for (auto& [type, name, member] : params)
+      {
+        if (equalStr.size() != 0)
+        {
+          outBodyString += " ||\n           ";
+        }
+        outBodyString += "(" + equalStr + "left." + member + " < " + name + ")";
+        equalStr += "left." + member + " == " + name + " && ";
+      }
+      outBodyString += ";\n  });\n";
+
+      outBodyString += "  if (searchLowerBound == " + tableName + "Values.end()";
+      for (auto& [type, name, member] : params)
+      {
+        outBodyString += " ||\n      searchLowerBound->" + member + " != " + name;
+      }
+      outBodyString += ")\n  {\n";
+      outBodyString += "    ret = " + tableName + "::ID(0);\n";
+      outBodyString += "    return false;\n";
+      outBodyString += "  }\n";
+
+
+      outBodyString += "  ret = " + tableName + "::ID((uint32_t)std::distance(" + tableName + "Values.begin(), searchLowerBound));\n";
+      outBodyString += "  return true;\n}\n";
+    }
+    outHeaderString += "\n"; 
 
     for (const auto& [_, tableName] : tableOrdering)
     {

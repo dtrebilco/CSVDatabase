@@ -133,6 +133,10 @@ public:
   template<typename T> const T& Get(IDType<T> id) const { return GetTable<T>()[id.m_dbIndex]; }
   template<typename T> bool ToID(uint32_t index, IDType<T>& id) const { if (index < GetTable<T>().size()) { id = IDType<T>(index); return true; } return false; }
 
+  bool Find(std::string_view name, WeaponTypes type, SpecialWeapons::ID& ret) const;
+  bool Find(std::string_view name, Weapons::ID& ret) const;
+  bool Find(std::string_view name, Characters::ID& ret) const;
+
   std::vector<SpecialWeapons> SpecialWeaponsValues;
   std::vector<Weapons> WeaponsValues;
   std::vector<Characters> CharactersValues;
