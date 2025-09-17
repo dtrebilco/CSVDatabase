@@ -1061,7 +1061,9 @@ int main(int argc, char* argv[])
             newTable.m_headerData[2].m_isKey  ||
             newTable.m_headerData[0].m_foreignTable.size() != 0 ||
             newTable.m_headerData[1].m_foreignTable.size() != 0 || 
-            newTable.m_headerData[2].m_foreignTable.size() != 0)
+            newTable.m_headerData[2].m_foreignTable.size() != 0 ||
+            newTable.m_headerData[0].m_name != "Name" ||
+            newTable.m_headerData[1].m_name != "Value")
         {
           OUTPUT_MESSAGE("Error: Enum table {} need three columns, single key and no foreign table links", tableName);
           return 1;
@@ -1388,7 +1390,7 @@ int main(int argc, char* argv[])
         outHeaderString += ", ";
       }
       outHeaderString += tableName;
-      outHeaderString += "::ID& ret) const;\n";
+      outHeaderString += "::ID& _ret) const;\n";
 
       outBodyString += "\nbool DB::DB::Find(";
       for (auto& [type, name, _] : params)
@@ -1399,9 +1401,9 @@ int main(int argc, char* argv[])
         outBodyString += ", ";
       }
       outBodyString += tableName;
-      outBodyString += "::ID& ret) const\n{\n";
+      outBodyString += "::ID& _ret) const\n{\n";
 
-      outBodyString += "  auto searchLowerBound = std::lower_bound(" + tableName + "Values.begin(), " + tableName + "Values.end(), 0, [&](const " + tableName + "& left, int)\n  {\n";
+      outBodyString += "  auto _searchLowerBound = std::lower_bound(" + tableName + "Values.begin(), " + tableName + "Values.end(), 0, [&](const " + tableName + "& left, int)\n  {\n";
 
       outBodyString += "    return ";
       std::string equalStr;
@@ -1416,18 +1418,18 @@ int main(int argc, char* argv[])
       }
       outBodyString += ";\n  });\n";
 
-      outBodyString += "  if (searchLowerBound == " + tableName + "Values.end()";
+      outBodyString += "  if (_searchLowerBound == " + tableName + "Values.end()";
       for (auto& [type, name, member] : params)
       {
-        outBodyString += " ||\n      searchLowerBound->" + member + " != " + name;
+        outBodyString += " ||\n      _searchLowerBound->" + member + " != " + name;
       }
       outBodyString += ")\n  {\n";
-      outBodyString += "    ret = " + tableName + "::ID(0);\n";
+      outBodyString += "    _ret = " + tableName + "::ID(0);\n";
       outBodyString += "    return false;\n";
       outBodyString += "  }\n";
 
 
-      outBodyString += "  ret = " + tableName + "::ID((uint32_t)std::distance(" + tableName + "Values.begin(), searchLowerBound));\n";
+      outBodyString += "  _ret = " + tableName + "::ID((uint32_t)std::distance(" + tableName + "Values.begin(), _searchLowerBound));\n";
       outBodyString += "  return true;\n}\n";
     }
     outHeaderString += "\n"; 
