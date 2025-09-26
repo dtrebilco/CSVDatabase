@@ -5,8 +5,8 @@ const char* DB::to_string(WeaponTypes value)
 {
   switch (value)
   {
-  case(WeaponTypes::Gun): return "Gun";
   case(WeaponTypes::None): return "None";
+  case(WeaponTypes::Gun): return "Gun";
   }
   return "";
 }

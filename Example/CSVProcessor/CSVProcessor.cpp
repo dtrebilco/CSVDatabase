@@ -494,6 +494,12 @@ bool ReadHeader(std::string_view field, CSVHeader& out)
     out.m_maxValue.clear();
   }
 
+  // If a foreign table link, set the type to string until it can access the foreign table
+  if (out.m_foreignTable.size() > 0)
+  {
+    out.m_type = FieldType("");
+  }
+
   // Abort if a name is not assigned
   if (out.m_name.size() == 0)
   {
@@ -752,7 +758,7 @@ bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
           }
           if (foundIndex < 0)
           {
-            OUTPUT_MESSAGE("Error: Table {} has link to table {} with out key {}", tableName, header.m_foreignTable, searchName);
+            OUTPUT_MESSAGE("Error: Table {} has link to table {} without key {}", tableName, header.m_foreignTable, searchName);
             return false;
           }
           matchIndices.push_back(foundIndex);
@@ -767,7 +773,7 @@ bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
           {
             for (uint32_t i = 0; i < foreignTable.m_keyColumns.size(); i++)
             {
-              const FieldType& aVal = a[foreignTable.m_keyColumns[i]];
+              const FieldType& aVal = a[foreignTable.m_keyColumns[i]]; // Enum sort issue?
               const FieldType& bVal = b[matchIndices[i]];
               if (aVal < bVal)
               {
@@ -901,6 +907,8 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
         // Add number type
         AppendToString(field, outFile);
       }
+
+      // DT_TODO: If an enum type, lookup the string version
     }
     outFile += newLine;
   }
@@ -964,6 +972,33 @@ bool CalculateTableDepth(const std::string& tableName, const std::unordered_map<
   return true;
 }
 
+bool ReadToString(const std::filesystem::path& path, std::string& outStr)
+{
+  // Open the file in binary mode to avoid newline conversions
+  std::ifstream file(path, std::ios::binary);
+  if (!file.is_open())
+  {
+    OUTPUT_MESSAGE("Error: Unable to open file {}", path.string());
+    return false;
+  }
+
+  // Seek to the end to determine file size
+  file.seekg(0, std::ios::end);
+  size_t fileSize = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  // Read into a buffer
+  outStr.resize(fileSize);
+
+  if (!file.read(outStr.data(), fileSize))
+  {
+    OUTPUT_MESSAGE("Error: Unable to read file contents {}", path.string());
+    return false;
+  }
+  file.close();
+  return true;
+}
+
 int main(int argc, char* argv[])
 {
   // Check if directory path is provided
@@ -993,123 +1028,214 @@ int main(int argc, char* argv[])
 
   // Iterate through files in directory
   std::unordered_map<std::string, CSVTable> tables;
-  std::unordered_map<std::string, CSVTable> rawEnumTables; // Unsorted raw enum tables
-  std::vector<char> csvFileData;
+  std::unordered_map<std::string, CSVTable> tablesEnumRaw; // Unsorted raw enum tables
+  std::unordered_map<std::string, CSVTable> tablesEnumNameSort; // Sorted by name enum tables
+
+  std::vector<std::filesystem::path> csvEnumFilePaths;
+  std::vector<std::filesystem::path> csvFilePaths;
+
+  // Get the paths of the files sorted into enum tables and regular tables
   for (const auto& entry : std::filesystem::directory_iterator(dirPath))
   {
     // Check if file has .csv extension
     std::string extension = entry.path().extension().string();
     if (entry.is_regular_file() &&
-        extension.size() == 4 &&
-        std::tolower(extension[0]) == '.' &&
-        std::tolower(extension[1]) == 'c' &&
-        std::tolower(extension[2]) == 's' &&
-        std::tolower(extension[3]) == 'v')
+      extension.size() == 4 &&
+      std::tolower(extension[0]) == '.' &&
+      std::tolower(extension[1]) == 'c' &&
+      std::tolower(extension[2]) == 's' &&
+      std::tolower(extension[3]) == 'v')
     {
-      // Open the file in binary mode to avoid newline conversions
+      std::string tableName = entry.path().stem().string();
+
+      if (IsEnumTable(tableName))
       {
-        std::ifstream file(entry.path(), std::ios::binary);
+        csvEnumFilePaths.push_back(entry.path());
+      }
+      else
+      {
+        csvFilePaths.push_back(entry.path());
+      }
+    }
+  }
+
+  // Process enums first as they swap their key column to be based on values
+  std::string csvFileData;
+  for (const auto& path : csvEnumFilePaths)
+  {
+    std::string tableName = path.stem().string();
+    if (!ReadToString(path, csvFileData))
+    {
+      return 1;
+    }
+
+    if (tables.contains(tableName))
+    {
+      OUTPUT_MESSAGE("Error: Duplicate table name {}", tableName);
+      return 1;
+    }
+
+    // Read in the table data from the file
+    CSVTable newTable;
+    if (!ReadTable(csvFileData.data(), newTable))
+    {
+      OUTPUT_MESSAGE("Error: Reading table {}", tableName);
+      return 1;
+    }
+
+    // Enums have a strict layout
+    if (newTable.m_headerData.size() != 3 ||
+      !newTable.m_headerData[0].m_isKey ||
+      newTable.m_headerData[1].m_isKey ||
+      newTable.m_headerData[2].m_isKey ||
+      newTable.m_headerData[0].m_foreignTable.size() != 0 ||
+      newTable.m_headerData[1].m_foreignTable.size() != 0 ||
+      newTable.m_headerData[2].m_foreignTable.size() != 0 ||
+      newTable.m_headerData[0].m_name != "Name" ||
+      newTable.m_headerData[1].m_name != "Value")
+    {
+      OUTPUT_MESSAGE("Error: Enum table {} need three columns, single key and no foreign table links", tableName);
+      return 1;
+    }
+
+    // Store a copy of the raw table before sorting
+    tablesEnumRaw[tableName] = newTable;
+
+    // Sort the table data by column and check for duplicates
+    if (!SortTable(newTable))
+    {
+      OUTPUT_MESSAGE("Error: Enum table {} failed to sort", tableName);
+      return 1;
+    }
+
+    tablesEnumNameSort[tableName] = newTable;
+
+    // Swap the key row and re-sort (needs to be sorted by number value)
+    newTable.m_headerData[0].m_isKey = false;
+    newTable.m_headerData[1].m_isKey = true;
+    newTable.m_keyColumns.resize(0);
+    newTable.m_keyColumns.push_back(1);
+    if (!SortTable(newTable))
+    {
+      OUTPUT_MESSAGE("Error: Enum table {} failed to sort by value", tableName);
+      return 1;
+    }
+
+    // Add to a map of all the csv files
+    tables[tableName] = std::move(newTable);
+  }
+
+  for (const auto& path : csvFilePaths)
+  {
+    std::string tableName = path.stem().string();
+    if (!ReadToString(path, csvFileData))
+    {
+      return 1;
+    }
+    if (tables.contains(tableName))
+    {
+      OUTPUT_MESSAGE("Error: Duplicate table name {}", tableName);
+      return 1;
+    }
+
+    // Read in the table data from the file
+    CSVTable newTable;
+    if (!ReadTable(csvFileData.data(), newTable))
+    {
+      OUTPUT_MESSAGE("Error: Reading table {}", tableName);
+      return 1;
+    }
+
+    // Check that Global and Enum tables have the correct format
+    if (IsGlobalTable(tableName) && newTable.m_rowData.size() != 1)
+    {
+      OUTPUT_MESSAGE("Error: Global table {} can only have one row - has {}", tableName, newTable.m_rowData.size());
+      return 1;
+    }
+
+    // Replace all enum values with numbers
+    {
+      // Loop for all headers
+      for (uint32_t i = 0; i < newTable.m_headerData.size(); i++)
+      {
+        CSVHeader& header = newTable.m_headerData[i];
+
+        // If a foreign key is an enum table
+        if (IsEnumTable(header.m_foreignTable))
+        {
+          // Get the lookup table
+          auto enumTableIter = tablesEnumNameSort.find(header.m_foreignTable);
+          if (enumTableIter == tablesEnumNameSort.end())
+          {
+            OUTPUT_MESSAGE("Error: Unable to find linked enum table {} for table", header.m_foreignTable, tableName);
+            return 1;
+          }
+          const CSVTable& enumTable = enumTableIter->second;
+
+          // Loop for all rows
+          header.m_type = enumTable.m_headerData[1].m_type;
+          for (std::vector<FieldType>& row : newTable.m_rowData)
+          {
+            auto findInfo = std::lower_bound(enumTable.m_rowData.begin(), enumTable.m_rowData.end(), row,
+              [i](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+              {
+                return a[0] < b[i];
+              });
+
+            auto IsEqual = [i](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+              {
+                return a[0] == b[i];
+              };
+
+            if (findInfo == enumTable.m_rowData.end() ||
+              !IsEqual(*findInfo, row))
+            {
+              OUTPUT_MESSAGE("Error: Table {} has link to table {} with a missing lookup column key {}", tableName, header.m_foreignTable, to_string(row[i]));
+              return 1;
+            }
+
+            // Swap the name for the int
+            row[i] = (*findInfo)[1];
+          }
+        }
+      }
+    }
+
+    // Sort the table data by column and check for duplicates
+    if (!SortTable(newTable))
+    {
+      OUTPUT_MESSAGE("Error: Table {} failed to sort", tableName);
+      return 1;
+    }
+
+    // DT_TODO: Add command line for resave of all tables
+    if (0){
+      std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
+
+      std::string outFile;
+      SaveToString(newTable, existingFile, outFile);
+
+      // Check if the file data has changed and re-save it if it has
+      if (existingFile != outFile)
+      {
+        std::ofstream file(path, std::ios::binary);
         if (!file.is_open())
         {
-          OUTPUT_MESSAGE("Error: Unable to open file {}", entry.path().string());
+          OUTPUT_MESSAGE("Error: Unable to open file for writing {}", path.string());
           return 1;
         }
 
-        // Seek to the end to determine file size
-        file.seekg(0, std::ios::end);
-        size_t fileSize = file.tellg();
-        file.seekg(0, std::ios::beg);
-
-        // Read into a buffer
-        csvFileData.resize(fileSize + 1);
-        csvFileData[fileSize] = 0; // Add null terminator
-
-        if (!file.read(csvFileData.data(), fileSize))
+        if (!file.write(outFile.data(), outFile.size()))
         {
-          OUTPUT_MESSAGE("Error: Unable to read file contents {}", entry.path().string());
+          OUTPUT_MESSAGE("Error: Unable to write file contents {}", path.string());
           return 1;
         }
         file.close();
       }
-
-      std::string tableName = entry.path().stem().string();
-      if (tables.contains(tableName))
-      {
-        OUTPUT_MESSAGE("Error: Duplicate table name {}", tableName);
-        return 1;
-      }
-
-      // Read in the table data from the file
-      CSVTable newTable;
-      if (!ReadTable(csvFileData.data(), newTable))
-      {
-        OUTPUT_MESSAGE("Error: Reading table {}", tableName);
-        return 1;
-      }
-
-      // Check that Global and Enum tables have the correct format
-      if (IsGlobalTable(tableName) && newTable.m_rowData.size() != 1)
-      {
-        OUTPUT_MESSAGE("Error: Global table {} can only have one row - has {}", tableName, newTable.m_rowData.size());
-        return 1;
-      }
-      if (IsEnumTable(tableName))
-      {
-        if (newTable.m_headerData.size() != 3 ||
-           !newTable.m_headerData[0].m_isKey  ||
-            newTable.m_headerData[1].m_isKey  ||
-            newTable.m_headerData[2].m_isKey  ||
-            newTable.m_headerData[0].m_foreignTable.size() != 0 ||
-            newTable.m_headerData[1].m_foreignTable.size() != 0 || 
-            newTable.m_headerData[2].m_foreignTable.size() != 0 ||
-            newTable.m_headerData[0].m_name != "Name" ||
-            newTable.m_headerData[1].m_name != "Value")
-        {
-          OUTPUT_MESSAGE("Error: Enum table {} need three columns, single key and no foreign table links", tableName);
-          return 1;
-        }
-
-        // Store a copy of the raw table before sorting
-        rawEnumTables[tableName] = newTable;
-      }
-
-      // Sort the table data by column and check for duplicates
-      if (!SortTable(newTable))
-      {
-        OUTPUT_MESSAGE("Error: Enum table {} failed to sort", tableName);
-        return 1;
-      }
-
-      // Check if enum table and do not resave - as enums could get re-ordered //DT_TODO: add command line for resave of all tables
-      if (!IsEnumTable(tableName))
-      {
-        std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
-
-        std::string outFile;
-        SaveToString(newTable, existingFile, outFile);
-
-        // Check if the file data has changed and re-save it if it has
-        if (existingFile != outFile)
-        {
-          std::ofstream file(entry.path(), std::ios::binary);
-          if (!file.is_open())
-          {
-            OUTPUT_MESSAGE("Error: Unable to open file for writing {}", entry.path().string());
-            return 1;
-          }
-
-          if (!file.write(outFile.data(), outFile.size()))
-          {
-            OUTPUT_MESSAGE("Error: Unable to write file contents {}", entry.path().string());
-            return 1;
-          }
-          file.close();
-        }
-      }
-
-      // Add to a map of all the csv files
-      tables[tableName] = std::move(newTable);
     }
+
+    // Add to a map of all the csv files
+    tables[tableName] = std::move(newTable);
   }
 
   // Validate tables
@@ -1133,11 +1259,9 @@ int main(int argc, char* argv[])
     std::string outHeaderString = s_commonHeaderStart;
     std::string outBodyString = s_commonBodyStart;
 
-    // Write out all enum types // DT_TODO: Sort enums by name for consistency in output?
-    for (const auto& [tableName, rawTable] : rawEnumTables)
+    // Write out all enum types // DT_TODO: Sort enums by table name for consistency in output?
+    for (const auto& [tableName, rawTable] : tablesEnumRaw)
     {
-      const CSVTable& sortedTable = tables[tableName];
-
       if (rawTable.m_rowData.size() > 0 && rawTable.m_headerData.size() == 3)
       {
         std::string enumName = tableName.substr(4);
@@ -1184,8 +1308,8 @@ int main(int argc, char* argv[])
         outBodyString += "const char* DB::to_string(" + enumName +" value)\n{\n";
         outBodyString += "  switch (value)\n  {\n";
 
-        // Use sorted arrays for lookups
-        for (const std::vector<FieldType>& row : sortedTable.m_rowData)
+        // Do to string lookups
+        for (const std::vector<FieldType>& row : rawTable.m_rowData)
         {
           outBodyString += "  case(" + enumName + "::";
           AppendToString(row[0], outBodyString);
@@ -1195,23 +1319,31 @@ int main(int argc, char* argv[])
         }
         outBodyString += "  }\n  return \"\";\n}\n\n";
 
+        // Create an array sorted by name to do a lookup
+        std::vector<std::string> sortedNames;
+        for (const std::vector<FieldType>& row : rawTable.m_rowData)
+        {
+          sortedNames.emplace_back(to_string(row[0]));
+        }
+        std::sort(sortedNames.begin(), sortedNames.end());
+
         outBodyString += "bool DB::find_enum(std::string_view name, " + enumName + "& out)\n{\n";
         outBodyString += "  std::string_view names[] =\n  {\n";
-        for (const std::vector<FieldType>& row : sortedTable.m_rowData)
+        for (const auto& name : sortedNames)
         {
           outBodyString += "    \"";
-          AppendToString(row[0], outBodyString);
+          outBodyString += name;
           outBodyString += "\",\n";
         }
         outBodyString += "  };\n";
 
         outBodyString += "  " + enumName + " values[] =\n  {\n";
-        for (const std::vector<FieldType>& row : sortedTable.m_rowData)
+        for (const auto& name : sortedNames)
         {
           outBodyString += "    ";
           outBodyString += enumName;
           outBodyString += "::";
-          AppendToString(row[0], outBodyString);
+          outBodyString += name;
           outBodyString += ",\n";
         }
         outBodyString += "  };\n";
@@ -1279,7 +1411,7 @@ int main(int argc, char* argv[])
             outHeaderString += " = ";
             outHeaderString += enumName;
             outHeaderString += "::";
-            AppendToString(rawEnumTables[header.m_foreignTable].m_rowData[0][0], outHeaderString);
+            AppendToString(tablesEnumRaw[header.m_foreignTable].m_rowData[0][0], outHeaderString);
             outHeaderString += ";\n";
           }
           else
