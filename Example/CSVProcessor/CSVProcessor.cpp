@@ -22,7 +22,7 @@ using FieldType = std::variant<std::string, bool, int8_t, uint8_t, int16_t, uint
 
 struct CSVHeader
 {
-  std::string m_fullField;   // The raw full field string
+  std::string m_rawField;    // The raw full field string
 
   std::string m_name;        // Column name
   FieldType m_type;          // Column type
@@ -407,7 +407,7 @@ std::vector<std::vector<std::string>> ReadCSV(const char* srcData)
 bool ReadHeader(std::string_view field, CSVHeader& out)
 {
   out = CSVHeader{};
-  out.m_fullField = field;
+  out.m_rawField = field;
 
   bool hasType = false;
   std::string_view tags = field;
@@ -690,6 +690,68 @@ bool SortTable(CSVTable & newTable)
   return true;
 }
 
+bool FindSourceHeaderColumn(const std::string& columnName, const std::string& foreignTableName, const std::unordered_map<std::string, CSVTable>& tables, std::string& outTableName, FieldType& outField)
+{
+  if (foreignTableName.size() == 0)
+  {
+    return false;
+  }
+
+  // Check foreign table exists
+  auto findTable = tables.find(foreignTableName);
+  if (findTable == tables.end())
+  {
+    OUTPUT_MESSAGE("Error: Column {} has link to unknown table {}", columnName, foreignTableName);
+    return false;
+  }
+
+  const CSVTable& foreignTable = findTable->second;
+  if (foreignTable.m_keyColumns.size() == 0)
+  {
+    OUTPUT_MESSAGE("Error: Column {} has link to table {} with no keys", columnName, foreignTableName);
+    return false;
+  }
+
+  // Get the base name end position
+  size_t headerSplitIndex = columnName.find_first_of(':');
+
+  // If only one foreign key, check for optional foreign table column name
+  int32_t foundIndex = -1;
+  if (foreignTable.m_keyColumns.size() == 1 && headerSplitIndex == std::string::npos)
+  {
+    // If only the base name, 
+    foundIndex = foreignTable.m_keyColumns[0];
+  }
+  else
+  {
+    // Find each base name+ foreign key name
+    std::string_view findName(columnName);
+    findName = findName.substr(headerSplitIndex + 1);
+    for (uint32_t foreignKeyColumn : foreignTable.m_keyColumns)
+    {
+      if (foreignTable.m_headerData[foreignKeyColumn].m_name == findName)
+      {
+        foundIndex = foreignKeyColumn;
+        break;
+      }
+    }
+  }
+  if (foundIndex < 0)
+  {
+    OUTPUT_MESSAGE("Error: Column {} has link to table {} without key", columnName, foreignTableName);
+    return false;
+  }
+  if (foreignTable.m_headerData[foundIndex].m_foreignTable.size() > 0)
+  {
+    return FindSourceHeaderColumn(foreignTable.m_headerData[foundIndex].m_name, foreignTable.m_headerData[foundIndex].m_foreignTable, tables, outTableName, outField);
+  }
+
+  outTableName = foreignTableName;
+  outField = foreignTable.m_headerData[foundIndex].m_type;
+
+  return true;
+}
+
 bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
 {
   // Check that the table references match up
@@ -826,7 +888,7 @@ bool ValidateTables(const std::unordered_map<std::string, CSVTable>& tables)
   return true;
 }
 
-void SaveToString(const CSVTable& table, std::string_view existingFile, std::string& outFile)
+void SaveToString(const CSVTable& table, const std::unordered_map<std::string, CSVTable>& tables, std::string_view existingFile, std::string& outFile)
 {
   std::string fieldStr;
   outFile.reserve(existingFile.size());
@@ -848,6 +910,7 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
   }
 
   // Write header data
+  std::vector<std::string> enumTableHeaders;
   {
     bool firstWrite = true;
     for (const CSVHeader& header : table.m_headerData)
@@ -857,7 +920,21 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
         outFile += ",";
       }
       firstWrite = false;
-      outFile += header.m_fullField;
+      outFile += header.m_rawField;
+
+      // Get what tables need an enum replacement with the text version
+      std::string lookupTable;
+      FieldType dummyField;
+      if (header.m_foreignTable.size() > 0 &&
+          FindSourceHeaderColumn(header.m_name, header.m_foreignTable, tables, lookupTable, dummyField) &&
+          IsEnumTable(lookupTable))
+      {
+        enumTableHeaders.push_back(lookupTable);
+      }
+      else
+      {
+        enumTableHeaders.push_back(std::string());
+      }
     }
   }
   outFile += newLine;
@@ -867,16 +944,53 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
   {
     // Loop and write the fields
     bool firstWrite = true;
-    for (const FieldType& field : row)
+    for(uint32_t i = 0; i < row.size(); i++)
     {
+      const FieldType* field = &row[i];
+
       if (!firstWrite)
       {
         outFile += ",";
       }
       firstWrite = false;
 
+      // If an enum type, lookup the string version
+      if (enumTableHeaders[i].size() > 0)
+      {
+        auto findTable = tables.find(enumTableHeaders[i]);
+        if (findTable == tables.end())
+        {
+          OUTPUT_MESSAGE("Error: Unknown table {}", enumTableHeaders[i]);
+          return;
+        }
+        const CSVTable& enumTable = findTable->second;
+
+        // Find the enum - access name column
+        auto findInfo = std::lower_bound(enumTable.m_rowData.begin(), enumTable.m_rowData.end(), row,
+          [i](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+          {
+            return a[1] < b[i];
+          });
+
+        auto IsEqual = [i](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+          {
+            return a[1] == b[i];
+          };
+
+        if (findInfo == enumTable.m_rowData.end() ||
+            !IsEqual(*findInfo, row))
+        {
+          OUTPUT_MESSAGE("Error: Table has link to table {} with a missing lookup column key {}", enumTableHeaders[i], to_string(row[i]));
+          return;
+        }
+        else
+        {
+          field = &(*findInfo)[0];
+        }
+      }
+
       // Get the field in string form
-      if (const std::string* accessField = std::get_if<std::string>(&field))
+      if (const std::string* accessField = std::get_if<std::string>(field))
       {
         // If the fields contain a comma or quotes, put in quotes
         size_t quoteOffset = accessField->find_first_of('"');
@@ -905,10 +1019,8 @@ void SaveToString(const CSVTable& table, std::string_view existingFile, std::str
       else
       {
         // Add number type
-        AppendToString(field, outFile);
+        AppendToString(*field, outFile);
       }
-
-      // DT_TODO: If an enum type, lookup the string version
     }
     outFile += newLine;
   }
@@ -1153,95 +1265,137 @@ int main(int argc, char* argv[])
       return 1;
     }
 
-    // Replace all enum values with numbers
-    {
-      // Loop for all headers
-      for (uint32_t i = 0; i < newTable.m_headerData.size(); i++)
-      {
-        CSVHeader& header = newTable.m_headerData[i];
+    // Add to a map of all the csv files
+    tables[tableName] = std::move(newTable);
+  }
 
-        // If a foreign key is an enum table
-        if (IsEnumTable(header.m_foreignTable))
+  // Follow all foreign table links and get the correct types for columns (enums go to the value type)
+  for (auto& [tableName, table] : tables)
+  {
+    // Check the table for foreign links
+    for (uint32_t h = 0; h < table.m_headerData.size(); h++)
+    {
+      CSVHeader& header = table.m_headerData[h];
+      if (header.m_foreignTable.size() == 0)
+      {
+        continue;
+      }
+
+      // Find the ultimate source of the column (DT_TODO check for header loops)
+      std::string finalTableName;
+      FieldType newType;
+      if (!FindSourceHeaderColumn(header.m_name, header.m_foreignTable, tables, finalTableName, newType))
+      {
+        OUTPUT_MESSAGE("Error: Table {} has link issues with {}", tableName, header.m_name);
+        return 1;
+      }
+
+      // If a foreign key is an enum table
+      if (IsEnumTable(finalTableName))
+      {
+        // Get the lookup table
+        auto enumTableIter = tablesEnumNameSort.find(finalTableName);
+        if (enumTableIter == tablesEnumNameSort.end())
         {
-          // Get the lookup table
-          auto enumTableIter = tablesEnumNameSort.find(header.m_foreignTable);
-          if (enumTableIter == tablesEnumNameSort.end())
+          OUTPUT_MESSAGE("Error: Unable to find linked enum table {} for table {}", finalTableName, tableName);
+          return 1;
+        }
+        const CSVTable& enumTable = enumTableIter->second;
+
+        // Loop for all rows
+        header.m_type = enumTable.m_headerData[1].m_type;
+        for (std::vector<FieldType>& row : table.m_rowData)
+        {
+          auto findInfo = std::lower_bound(enumTable.m_rowData.begin(), enumTable.m_rowData.end(), row,
+            [h](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+            {
+              return a[0] < b[h];
+            });
+
+          auto IsEqual = [h](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
+            {
+              return a[0] == b[h];
+            };
+
+          if (findInfo == enumTable.m_rowData.end() ||
+            !IsEqual(*findInfo, row))
           {
-            OUTPUT_MESSAGE("Error: Unable to find linked enum table {} for table", header.m_foreignTable, tableName);
+            OUTPUT_MESSAGE("Error: Table {} has link to table {} with a missing lookup column key {}", tableName, header.m_foreignTable, to_string(row[h]));
             return 1;
           }
-          const CSVTable& enumTable = enumTableIter->second;
 
-          // Loop for all rows
-          header.m_type = enumTable.m_headerData[1].m_type;
-          for (std::vector<FieldType>& row : newTable.m_rowData)
+          // Swap the name for the integer
+          row[h] = (*findInfo)[1];
+        }
+      }
+      // Only convert if the new type is not already a string
+      else if(!std::holds_alternative<std::string>(newType))
+      {
+        header.m_type = newType;
+        for (std::vector<FieldType>& row : table.m_rowData)
+        {
+          // Should always be a string here
+          if (const std::string* accessField = std::get_if<std::string>(&row[h]))
           {
-            auto findInfo = std::lower_bound(enumTable.m_rowData.begin(), enumTable.m_rowData.end(), row,
-              [i](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
-              {
-                return a[0] < b[i];
-              });
-
-            auto IsEqual = [i](const std::vector<FieldType>& a, const std::vector<FieldType>& b)
-              {
-                return a[0] == b[i];
-              };
-
-            if (findInfo == enumTable.m_rowData.end() ||
-              !IsEqual(*findInfo, row))
+            if (!ParseField(header.m_type, *accessField, newType))
             {
-              OUTPUT_MESSAGE("Error: Table {} has link to table {} with a missing lookup column key {}", tableName, header.m_foreignTable, to_string(row[i]));
+              OUTPUT_MESSAGE("Error: Table has bad data in column {} - {}", header.m_name, *accessField);
               return 1;
             }
-
-            // Swap the name for the int
-            row[i] = (*findInfo)[1];
+            row[h] = newType;
           }
         }
       }
     }
+  }
 
-    // Sort the table data by column and check for duplicates
-    if (!SortTable(newTable))
+  // Sort the table data by column and check for duplicates
+  for (auto& [tableName, table] : tables)
+  {
+    if (!SortTable(table))
     {
       OUTPUT_MESSAGE("Error: Table {} failed to sort", tableName);
       return 1;
     }
-
-    // DT_TODO: Add command line for resave of all tables
-    if (0){
-      std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
-
-      std::string outFile;
-      SaveToString(newTable, existingFile, outFile);
-
-      // Check if the file data has changed and re-save it if it has
-      if (existingFile != outFile)
-      {
-        std::ofstream file(path, std::ios::binary);
-        if (!file.is_open())
-        {
-          OUTPUT_MESSAGE("Error: Unable to open file for writing {}", path.string());
-          return 1;
-        }
-
-        if (!file.write(outFile.data(), outFile.size()))
-        {
-          OUTPUT_MESSAGE("Error: Unable to write file contents {}", path.string());
-          return 1;
-        }
-        file.close();
-      }
-    }
-
-    // Add to a map of all the csv files
-    tables[tableName] = std::move(newTable);
   }
 
   // Validate tables
   if (!ValidateTables(tables))
   {
     return 1;
+  }
+
+  // DT_TODO: Add command line for resave of all tables
+  for (const auto& path : csvFilePaths)
+  {
+    std::string tableName = path.stem().string();
+    if (!ReadToString(path, csvFileData))
+    {
+      return 1;
+    }
+
+    std::string_view existingFile(csvFileData.data(), csvFileData.size() - 1);
+
+    std::string outFile;
+    SaveToString(tables[tableName], tables, existingFile, outFile);
+
+    // Check if the file data has changed and re-save it if it has
+    if (existingFile != outFile)
+    {
+      std::ofstream file(path, std::ios::binary);
+      if (!file.is_open())
+      {
+        OUTPUT_MESSAGE("Error: Unable to open file for writing {}", path.string());
+        return 1;
+      }
+
+      if (!file.write(outFile.data(), outFile.size()))
+      {
+        OUTPUT_MESSAGE("Error: Unable to write file contents {}", path.string());
+        return 1;
+      }
+      file.close();
+    }
   }
 
   if (outputPathStr)
