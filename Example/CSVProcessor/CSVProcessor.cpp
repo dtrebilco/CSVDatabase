@@ -1,3 +1,5 @@
+#include "CSVProcessor.h"
+
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -6,8 +8,6 @@
 #include <unordered_map>
 #include <charconv>
 #include <algorithm>
-
-#include "CSVProcessor.h"
 
 // TODO: Add test where the key is a foreign key - part of a multi key also
 //       Test when key is int type and what to do when referenced by a foreign key
