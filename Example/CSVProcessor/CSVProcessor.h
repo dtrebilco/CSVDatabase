@@ -46,6 +46,16 @@ struct CSVTable
   std::vector<std::vector<FieldType>> m_rowData;
 };
 
+struct DBTables
+{
+  std::vector<std::filesystem::path> m_csvEnumFilePaths;
+  std::vector<std::filesystem::path> m_csvFilePaths;
+
+  std::unordered_map<std::string, CSVTable> m_tables;        // All table data
+  std::unordered_map<std::string, CSVTable> m_tablesEnumRaw; // Unsorted raw enum tables
+  std::unordered_map<std::string, CSVTable> m_tablesEnumNameSort; // Sorted by name enum tables
+};
+
 constexpr bool IsGlobalTable(std::string_view tableName) { return tableName.starts_with("Global"); }
 constexpr bool IsEnumTable(std::string_view tableName) { return tableName.starts_with("Enum"); }
 
@@ -69,3 +79,6 @@ void SaveToString(const CSVTable& table, const std::unordered_map<std::string, C
 bool CalculateTableDepth(const std::string& tableName, const std::unordered_map<std::string, CSVTable>& tables, std::unordered_map<std::string, uint32_t>& tableDepths, uint32_t& depth);
 
 bool ReadToString(const std::filesystem::path& path, std::string& outStr);
+
+bool ReadDB(const char* dirPath, DBTables& outTables);
+bool ResolveForeignLinkTypes(DBTables& db);
